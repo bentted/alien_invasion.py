@@ -1,4 +1,4 @@
-Here’s a suggested `README.md` file for the `alien_invasion.py` repository:
+
 
 ---
 
@@ -70,4 +70,4 @@ Feel free to fork the repository, make improvements, and submit a pull request. 
 
 ---
 
-Let me know if you’d like to add more details or sections!
+
