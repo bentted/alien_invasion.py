@@ -3,6 +3,13 @@ from time import sleep
 import json # Added for saving/loading high scores (optional future step)
 
 import pygame
+import os # Import os
+
+# Get the absolute path of the directory containing this script
+# __file__ is the path to the current script
+script_dir = os.path.dirname(os.path.abspath(__file__))
+# Change the current working directory to the script's directory
+os.chdir(script_dir)
 
 from settings import Settings
 from game_stats import GameStats
@@ -42,7 +49,7 @@ class AlienInvasion:
         self.user_input = ""
         self.username_input_active = True # Start by asking for username
         self.high_scores = {} # Stores {username: score}
-        # self._load_high_scores() # Optional: Load scores from a file
+        self._load_high_scores() # Load scores from a file
 
         # Start Alien Invasion in an inactive state.
         self.game_active = False
@@ -70,7 +77,7 @@ class AlienInvasion:
         """Respond to keypresses and mouse events."""
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                # self._save_high_scores() # Optional: Save scores before exiting
+                self._save_high_scores() # Save scores before exiting
                 sys.exit()
             elif event.type == pygame.KEYDOWN:
                 if self.username_input_active:
@@ -185,6 +192,21 @@ class AlienInvasion:
             self.stats.level += 1
             self.sb.prep_level()
 
+    def _update_aliens(self):
+        """
+        Check if the fleet is at an edge,
+          then update the positions of all aliens in the fleet.
+        """
+        self._check_fleet_edges()
+        self.aliens.update()
+
+        # Look for alien-ship collisions.
+        if pygame.sprite.spritecollideany(self.ship, self.aliens):
+            self._ship_hit()
+
+        # Look for aliens hitting the bottom of the screen.
+        self._check_aliens_bottom()
+
     def _ship_hit(self):
         """Respond to the ship being hit by an alien."""
         if self.stats.ships_left > 0:
@@ -259,6 +281,31 @@ class AlienInvasion:
         for alien in self.aliens.sprites():
             alien.rect.y += self.settings.fleet_drop_speed
         self.settings.fleet_direction *= -1
+
+    def _check_aliens_bottom(self):
+        """Check if any aliens have reached the bottom of the screen."""
+        screen_rect = self.screen.get_rect()
+        for alien in self.aliens.sprites():
+            if alien.rect.bottom >= screen_rect.bottom:
+                # Treat this the same as if the ship got hit.
+                self._ship_hit()
+                break
+
+    def _save_high_scores(self):
+        """Save high scores to a file."""
+        filename = 'high_scores.json'
+        with open(filename, 'w') as f:
+            json.dump(self.high_scores, f)
+
+    def _load_high_scores(self):
+        """Load high scores from a file."""
+        filename = 'high_scores.json'
+        try:
+            with open(filename) as f:
+                self.high_scores = json.load(f)
+        except FileNotFoundError:
+            # No high scores file yet, so no scores to load.
+            pass # self.high_scores remains an empty dict
 
     def _draw_username_input(self):
         """Draw the username input field on the screen."""
