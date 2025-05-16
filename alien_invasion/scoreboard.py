@@ -26,13 +26,26 @@ class Scoreboard:
         self.prep_ships()
 
     def prep_score(self):
-        """Turn the score into a rendered image."""
+        """Turn the score into a rendered image, including the username."""
+        username = self.ai_game.username  # Access username from the AlienInvasion instance
+        
+        # Ensure score is rounded and formatted as before
         rounded_score = round(self.stats.score, -1)
-        score_str = f"{rounded_score:,}"
-        self.score_image = self.font.render(score_str, True,
-                self.text_color, self.settings.bg_color)
+        score_value_str = f"{rounded_score:,}"
 
-        # Display the score at the top right of the screen.
+        if username:
+            # Prepend username if it exists
+            score_display_str = f"{username}: {score_value_str}"
+        else:
+            # Fallback to just the score if no username is set
+            score_display_str = score_value_str
+            
+        # Render the text (assuming self.text_color and self.settings.bg_color are available)
+        # If self.text_color is not an attribute, you might need to use self.settings.text_color
+        self.score_image = self.font.render(score_display_str, True,
+                                             self.text_color, self.settings.bg_color)
+
+        # Position the score at the top right, adjust if necessary due to longer text
         self.score_rect = self.score_image.get_rect()
         self.score_rect.right = self.screen_rect.right - 20
         self.score_rect.top = 20

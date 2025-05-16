@@ -35,10 +35,16 @@ class AlienInvasion:
         self.screen_rect = self.screen.get_rect() # Moved and corrected
         pygame.display.set_caption("Alien Invasion")
 
+        # Username and high score attributes (moved earlier)
+        self.username = "" 
+        self.user_input = ""
+        self.high_scores = {} # Stores {username: score}
+        self._load_high_scores() # Load scores from a file
+
         # Create an instance to store game statistics,
         #   and create a scoreboard.
         self.stats = GameStats(self)
-        self.sb = Scoreboard(self)
+        self.sb = Scoreboard(self) # Now username exists when Scoreboard is initialized
 
         self.ship = Ship(self)
         self.bullets = pygame.sprite.Group()
@@ -46,13 +52,7 @@ class AlienInvasion:
 
         self._create_fleet()
 
-        # Username and high score attributes
-        self.username = ""
-        self.user_input = ""
-        self.high_scores = {} # Stores {username: score}
-        self._load_high_scores() # Load scores from a file
-
-        # Game states
+        # Game states (username attributes were here before)
         self.title_screen_active = True
         self.settings_page_active = False
         self.username_input_active = False # Will be True after clicking Start on title screen
@@ -131,41 +131,51 @@ class AlienInvasion:
         """Respond to keypresses and mouse events."""
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                self._save_high_scores() 
+                self._save_high_scores()
                 sys.exit()
+
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    if self.settings_page_active:
+                        # On settings page, ESC goes back to title screen
+                        self._apply_slider_settings()
+                        self.settings_page_active = False
+                        self.title_screen_active = True
+                        continue  # Skip general ESC quit handling
+                    else:
+                        # For all other states, ESC quits the game
+                        self._save_high_scores()
+                        sys.exit()
             
+            # State-specific event handling
             if self.title_screen_active:
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     mouse_pos = pygame.mouse.get_pos()
                     self._check_title_screen_buttons(mouse_pos)
             elif self.settings_page_active:
-                for slider in self.settings_sliders: # Handle slider events
+                # Handle events for sliders first
+                for slider in self.settings_sliders:
                     slider.handle_event(event)
+                # Then check for button clicks on settings page
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     mouse_pos = pygame.mouse.get_pos()
                     self._check_settings_page_buttons(mouse_pos)
-                elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_ESCAPE:
-                        self._apply_slider_settings() # Apply settings on Esc
-                        self.settings_page_active = False
-                        self.title_screen_active = True
+                # ESC for settings page is handled in the KEYDOWN block above
             elif self.username_input_active:
                 if event.type == pygame.KEYDOWN:
+                    # ESC to quit is handled above, _handle_username_input processes other keys
                     self._handle_username_input(event)
-                # No mouse button checks here, username input is keyboard only
-            elif self.game_active: # Events during active gameplay
+            elif self.game_active:
                 if event.type == pygame.KEYDOWN:
+                    # ESC to quit is handled above, _check_keydown_events handles 'q' and game keys
                     self._check_keydown_events(event)
                 elif event.type == pygame.KEYUP:
                     self._check_keyup_events(event)
-                # MOUSEBUTTONDOWN for play button is handled in the else block below
-            
-            # This handles the original play button after username input, or other non-gameplay clicks
-            if not self.game_active and not self.title_screen_active and \
-               not self.settings_page_active and not self.username_input_active:
+            else:  # This is the screen after username input, before Play (original) is clicked
+                   # (i.e., not title, not settings, not username_input, not game_active)
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     mouse_pos = pygame.mouse.get_pos()
-                    self._check_play_button(mouse_pos) # Original play button
+                    self._check_play_button(mouse_pos)
 
     def _check_title_screen_buttons(self, mouse_pos):
         """Check if any title screen buttons were clicked."""
@@ -238,6 +248,7 @@ class AlienInvasion:
         elif event.key == pygame.K_LEFT:
             self.ship.moving_left = True
         elif event.key == pygame.K_q:
+            self._save_high_scores() # Ensure scores are saved before exiting
             sys.exit()
         elif event.key == pygame.K_SPACE:
             self._fire_bullet()
