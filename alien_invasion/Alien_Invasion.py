@@ -1,5 +1,6 @@
 import sys
 from time import sleep
+import json # Added for saving/loading high scores (optional future step)
 
 import pygame
 
@@ -36,11 +37,21 @@ class AlienInvasion:
 
         self._create_fleet()
 
+        # Username and high score attributes
+        self.username = ""
+        self.user_input = ""
+        self.username_input_active = True # Start by asking for username
+        self.high_scores = {} # Stores {username: score}
+        # self._load_high_scores() # Optional: Load scores from a file
+
         # Start Alien Invasion in an inactive state.
         self.game_active = False
 
         # Make the Play button.
         self.play_button = Button(self, "Play")
+        
+        # Font for username input
+        self.font = pygame.font.SysFont(None, 48)
 
     def run_game(self):
         """Start the main loop for the game."""
@@ -59,19 +70,42 @@ class AlienInvasion:
         """Respond to keypresses and mouse events."""
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
+                # self._save_high_scores() # Optional: Save scores before exiting
                 sys.exit()
             elif event.type == pygame.KEYDOWN:
-                self._check_keydown_events(event)
+                if self.username_input_active:
+                    self._handle_username_input(event)
+                else:
+                    self._check_keydown_events(event)
             elif event.type == pygame.KEYUP:
-                self._check_keyup_events(event)
+                if not self.username_input_active: # Keyup events only relevant during gameplay
+                    self._check_keyup_events(event)
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 mouse_pos = pygame.mouse.get_pos()
-                self._check_play_button(mouse_pos)
+                if not self.username_input_active: # Play button only clickable if not entering username
+                    self._check_play_button(mouse_pos)
+
+    def _handle_username_input(self, event):
+        """Handle keypresses during username input."""
+        if event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER:
+            if self.user_input: # Ensure username is not empty
+                self.username = self.user_input
+                self.username_input_active = False
+                self.user_input = "" # Clear input field for next time
+                # After username is entered, scoreboard might need to be updated if it shows username
+                self.sb.prep_score() # Refresh score display, potentially with username
+                self.sb.prep_high_score() # Refresh high score display
+        elif event.key == pygame.K_BACKSPACE:
+            self.user_input = self.user_input[:-1]
+        elif len(self.user_input) < 20: # Limit username length
+            self.user_input += event.unicode
+
 
     def _check_play_button(self, mouse_pos):
         """Start a new game when the player clicks Play."""
+        # Play button should only work if username has been entered and game is not active
         button_clicked = self.play_button.rect.collidepoint(mouse_pos)
-        if button_clicked and not self.game_active:
+        if button_clicked and not self.game_active and not self.username_input_active:
             # Reset the game settings.
             self.settings.initialize_dynamic_settings()
 
@@ -171,26 +205,22 @@ class AlienInvasion:
         else:
             self.game_active = False
             pygame.mouse.set_visible(True)
+            # Save score
+            if self.username: # Ensure there's a username
+                current_high_score = self.high_scores.get(self.username, 0)
+                if self.stats.score > current_high_score:
+                    self.high_scores[self.username] = self.stats.score
+                # Update overall high score for display if necessary
+                if self.stats.score > self.stats.high_score:
+                    self.stats.high_score = self.stats.score # This updates the general high score
+                    self.sb.prep_high_score() # Update display
+                # self._save_high_scores() # Optional: save to file immediately
+            
+            # Reset for next username input
+            self.username_input_active = True
+            # self.username = "" # Keep username or clear? For now, keep for convenience if playing again.
+            self.user_input = ""
 
-    def _update_aliens(self):
-        """Check if the fleet is at an edge, then update positions."""
-        self._check_fleet_edges()
-        self.aliens.update()
-
-        # Look for alien-ship collisions.
-        if pygame.sprite.spritecollideany(self.ship, self.aliens):
-            self._ship_hit()
-
-        # Look for aliens hitting the bottom of the screen.
-        self._check_aliens_bottom()
-
-    def _check_aliens_bottom(self):
-        """Check if any aliens have reached the bottom of the screen."""
-        for alien in self.aliens.sprites():
-            if alien.rect.bottom >= self.settings.screen_height:
-                # Treat this the same as if the ship got hit.
-                self._ship_hit()
-                break
 
     def _create_fleet(self):
         """Create the fleet of aliens."""
@@ -230,20 +260,40 @@ class AlienInvasion:
             alien.rect.y += self.settings.fleet_drop_speed
         self.settings.fleet_direction *= -1
 
+    def _draw_username_input(self):
+        """Draw the username input field on the screen."""
+        prompt_text = "Enter Username (Press Enter to Confirm):"
+        prompt_image = self.font.render(prompt_text, True, (255, 255, 255), self.settings.bg_color)
+        prompt_rect = prompt_image.get_rect()
+        prompt_rect.centerx = self.screen.get_rect().centerx
+        prompt_rect.centery = self.screen.get_rect().centery - 50
+        self.screen.blit(prompt_image, prompt_rect)
+
+        input_text_image = self.font.render(self.user_input, True, (255, 255, 255), self.settings.bg_color)
+        input_text_rect = input_text_image.get_rect()
+        input_text_rect.centerx = self.screen.get_rect().centerx
+        input_text_rect.centery = self.screen.get_rect().centery
+        self.screen.blit(input_text_image, input_text_rect)
+
     def _update_screen(self):
         """Update images on the screen, and flip to the new screen."""
         self.screen.fill(self.settings.bg_color)
-        for bullet in self.bullets.sprites():
-            bullet.draw_bullet()
-        self.ship.blitme()
-        self.aliens.draw(self.screen)
+        
+        if self.username_input_active:
+            self._draw_username_input()
+        else:
+            # Draw game elements only if username input is done
+            for bullet in self.bullets.sprites():
+                bullet.draw_bullet()
+            self.ship.blitme()
+            self.aliens.draw(self.screen)
 
-        # Draw the score information.
-        self.sb.show_score()
+            # Draw the score information.
+            self.sb.show_score() # show_score might need username passed or use self.ai.username
 
-        # Draw the play button if the game is inactive.
-        if not self.game_active:
-            self.play_button.draw_button()
+            # Draw the play button if the game is inactive and username input is done.
+            if not self.game_active:
+                self.play_button.draw_button()
 
         pygame.display.flip()
 
