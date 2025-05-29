@@ -1,15 +1,11 @@
 import sys
-from time import sleep
-import json # Added for saving/loading high scores (optional future step)
-
+from time import sleep, time
+import json 
+import requests 
 import pygame
-import os # Import os
+import os 
+import threading
 
-# Get the absolute path of the directory containing this script
-# __file__ is the path to the current script
-script_dir = os.path.dirname(os.path.abspath(__file__))
-# Change the current working directory to the script's directory
-os.chdir(script_dir)
 
 from settings import Settings
 from game_stats import GameStats
@@ -18,7 +14,7 @@ from buttons import Button
 from ship import Ship
 from bullet import Bullet
 from alien import Alien
-from slider import Slider # Import the Slider class
+from slider import Slider
 
 
 class AlienInvasion:
@@ -32,19 +28,16 @@ class AlienInvasion:
 
         self.screen = pygame.display.set_mode(
             (self.settings.screen_width, self.settings.screen_height))
-        self.screen_rect = self.screen.get_rect() # Moved and corrected
+        self.screen_rect = self.screen.get_rect() 
         pygame.display.set_caption("Alien Invasion")
 
-        # Username and high score attributes (moved earlier)
         self.username = "" 
         self.user_input = ""
-        self.high_scores = {} # Stores {username: score}
-        self._load_high_scores() # Load scores from a file
+        self.high_scores = {} 
+        self._load_high_scores() 
 
-        # Create an instance to store game statistics,
-        #   and create a scoreboard.
         self.stats = GameStats(self)
-        self.sb = Scoreboard(self) # Now username exists when Scoreboard is initialized
+        self.sb = Scoreboard(self) 
 
         self.ship = Ship(self)
         self.bullets = pygame.sprite.Group()
@@ -52,65 +45,61 @@ class AlienInvasion:
 
         self._create_fleet()
 
-        # Game states (username attributes were here before)
         self.title_screen_active = True
         self.settings_page_active = False
-        self.username_input_active = False # Will be True after clicking Start on title screen
+        self.username_input_active = False 
         self.game_active = False
 
-        # Make the Play button (for after username input).
         self.play_button = Button(self, "Play")
         
-        # Title screen buttons
         self.start_button = Button(self, "Start Game")
         self.settings_button = Button(self, "Settings")
         self.exit_button = Button(self, "Exit")
         
-        # Settings page button
         self.back_button = Button(self, "Back")
 
-        # Font for username input and title
         self.font = pygame.font.SysFont(None, 48)
         self.title_font = pygame.font.SysFont(None, 72)
 
-        # Load alien image for title screen
+        self.leaderboard_font = pygame.font.SysFont(None, 36) 
+        self.global_leaderboard_data = [] 
+        self.global_leaderboard_images = [] 
+        self.max_leaderboard_entries = 5 
+
         try:
-            self.alien_title_image = pygame.image.load('images/alien.bmp')
-            # Scale it if it's too small or too large for title screen decoration
-            self.alien_title_image = pygame.transform.scale(self.alien_title_image, (100, 80)) 
-        except pygame.error:
-            self.alien_title_image = None # Handle missing image gracefully
-        
+            self.alien_title_image = pygame.image.load('images/alien_title.bmp') 
+        except pygame.error as e:
+            print(f"Error loading title alien image: {e}")
+            self.alien_title_image = None 
+
         self._initialize_settings_sliders()
+        self.server_url = "http://127.0.0.1:5000" 
+        
+        self.sse_client_running = False
+        self.leaderboard_update_pending = False
+        self.sse_thread = None
+        
+        self._load_global_leaderboard() 
+        self._start_sse_listener() 
 
     def _initialize_settings_sliders(self):
         """Create sliders for the settings page."""
         self.settings_sliders = []
         slider_width = 250
         slider_height = 20
-        slider_x = self.screen_rect.centerx - (slider_width / 2) # Centered
+        slider_x = self.screen_rect.centerx - (slider_width / 2) 
         start_y = 150
-        y_increment = 50 # Increased spacing for labels
+        y_increment = 50 
 
-        # Ship Limit Slider
         self.settings_sliders.append(Slider(self.screen, "Ship Limit", slider_x, start_y, slider_width, slider_height, 1, 10, self.settings.ship_limit))
-        # Bullets Allowed Slider
         self.settings_sliders.append(Slider(self.screen, "Bullets Allowed", slider_x, start_y + y_increment, slider_width, slider_height, 1, 10, self.settings.bullets_allowed))
-        # Ship Speed Slider
         self.settings_sliders.append(Slider(self.screen, "Ship Speed", slider_x, start_y + 2 * y_increment, slider_width, slider_height, 0.5, 5.0, self.settings.ship_speed, is_float=True))
-        # Bullet Speed Slider
         self.settings_sliders.append(Slider(self.screen, "Bullet Speed", slider_x, start_y + 3 * y_increment, slider_width, slider_height, 1.0, 10.0, self.settings.bullet_speed, is_float=True))
-        # Alien Speed Slider
         self.settings_sliders.append(Slider(self.screen, "Alien Speed", slider_x, start_y + 4 * y_increment, slider_width, slider_height, 0.1, 3.0, self.settings.alien_speed, is_float=True))
-        # Fleet Drop Speed Slider
         self.settings_sliders.append(Slider(self.screen, "Fleet Drop Speed", slider_x, start_y + 5 * y_increment, slider_width, slider_height, 5, 50, self.settings.fleet_drop_speed))
-        # Speedup Scale Slider
         self.settings_sliders.append(Slider(self.screen, "Speedup Scale", slider_x, start_y + 6 * y_increment, slider_width, slider_height, 1.0, 2.0, self.settings.speedup_scale, is_float=True))
-        # Score Scale Slider
         self.settings_sliders.append(Slider(self.screen, "Score Scale", slider_x, start_y + 7 * y_increment, slider_width, slider_height, 1.0, 3.0, self.settings.score_scale, is_float=True))
-        # Bullet Width Slider
         self.settings_sliders.append(Slider(self.screen, "Bullet Width", slider_x, start_y + 8 * y_increment, slider_width, slider_height, 1, 10, self.settings.bullet_width))
-        # Bullet Height Slider
         self.settings_sliders.append(Slider(self.screen, "Bullet Height", slider_x, start_y + 9 * y_increment, slider_width, slider_height, 5, 30, self.settings.bullet_height))
 
     def run_game(self):
@@ -118,7 +107,11 @@ class AlienInvasion:
         while True:
             self._check_events()
 
-            # No updates needed if on title or settings screen, only drawing
+            if self.leaderboard_update_pending:
+                print("Leaderboard update detected by main loop, refreshing...")
+                self._load_global_leaderboard() 
+                self.leaderboard_update_pending = False
+
             if self.game_active:
                 self.ship.update()
                 self._update_bullets()
@@ -132,47 +125,50 @@ class AlienInvasion:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self._save_high_scores()
+                self.sse_client_running = False 
+                if self.sse_thread and self.sse_thread.is_alive():
+                    try:
+                        self.sse_thread.join(timeout=1.0) 
+                    except RuntimeError:
+                        pass 
                 sys.exit()
 
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     if self.settings_page_active:
-                        # On settings page, ESC goes back to title screen
                         self._apply_slider_settings()
                         self.settings_page_active = False
                         self.title_screen_active = True
-                        continue  # Skip general ESC quit handling
+                        continue  
                     else:
-                        # For all other states, ESC quits the game
                         self._save_high_scores()
+                        self.sse_client_running = False 
+                        if self.sse_thread and self.sse_thread.is_alive():
+                            try:
+                                self.sse_thread.join(timeout=1.0) 
+                            except RuntimeError:
+                                pass 
                         sys.exit()
             
-            # State-specific event handling
             if self.title_screen_active:
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     mouse_pos = pygame.mouse.get_pos()
                     self._check_title_screen_buttons(mouse_pos)
             elif self.settings_page_active:
-                # Handle events for sliders first
                 for slider in self.settings_sliders:
                     slider.handle_event(event)
-                # Then check for button clicks on settings page
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     mouse_pos = pygame.mouse.get_pos()
                     self._check_settings_page_buttons(mouse_pos)
-                # ESC for settings page is handled in the KEYDOWN block above
             elif self.username_input_active:
                 if event.type == pygame.KEYDOWN:
-                    # ESC to quit is handled above, _handle_username_input processes other keys
                     self._handle_username_input(event)
             elif self.game_active:
                 if event.type == pygame.KEYDOWN:
-                    # ESC to quit is handled above, _check_keydown_events handles 'q' and game keys
                     self._check_keydown_events(event)
                 elif event.type == pygame.KEYUP:
                     self._check_keyup_events(event)
-            else:  # This is the screen after username input, before Play (original) is clicked
-                   # (i.e., not title, not settings, not username_input, not game_active)
+            else:  
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     mouse_pos = pygame.mouse.get_pos()
                     self._check_play_button(mouse_pos)
@@ -182,7 +178,7 @@ class AlienInvasion:
         if self.start_button.rect.collidepoint(mouse_pos):
             self.title_screen_active = False
             self.username_input_active = True
-            pygame.mouse.set_visible(True) # Show cursor for username input
+            pygame.mouse.set_visible(True) 
         elif self.settings_button.rect.collidepoint(mouse_pos):
             self.title_screen_active = False
             self.settings_page_active = True
@@ -193,52 +189,50 @@ class AlienInvasion:
     def _check_settings_page_buttons(self, mouse_pos):
         """Check if any settings page buttons were clicked."""
         if self.back_button.rect.collidepoint(mouse_pos):
-            self._apply_slider_settings() # Apply settings before going back
+            self._apply_slider_settings() 
             self.settings_page_active = False
             self.title_screen_active = True
-            # Add logic to save settings if they were changed
 
     def _handle_username_input(self, event):
         """Handle keypresses during username input."""
         if event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER:
-            if self.user_input: # Ensure username is not empty
+            if self.user_input: 
                 self.username = self.user_input
                 self.username_input_active = False
-                self.user_input = "" # Clear input field for next time
-                # After username is entered, scoreboard might need to be updated if it shows username
-                self.sb.prep_score() # Refresh score display, potentially with username
-                self.sb.prep_high_score() # Refresh high score display
+                self.user_input = "" 
+                self.sb.prep_score() 
+                self.sb.prep_high_score() 
+                self.title_screen_active = False
+                self.settings_page_active = False
+                self.game_active = False
         elif event.key == pygame.K_BACKSPACE:
             self.user_input = self.user_input[:-1]
-        elif len(self.user_input) < 20: # Limit username length
+        elif len(self.user_input) < 20: 
             self.user_input += event.unicode
 
     def _check_play_button(self, mouse_pos):
         """Start a new game when the player clicks Play (original button)."""
         button_clicked = self.play_button.rect.collidepoint(mouse_pos)
-        # This button is only active if no other screen is active and game is not active
         if button_clicked and not self.game_active and \
            not self.title_screen_active and not self.settings_page_active \
-           and not self.username_input_active and self.username: # Ensure username is entered
-            # Reset the game settings.
+           and not self.username_input_active and self.username: 
             self.settings.initialize_dynamic_settings()
 
-            # Reset the game statistics.
             self.stats.reset_stats()
             self.sb.prep_score()
+            self.sb.prep_high_score() 
             self.sb.prep_level()
             self.sb.prep_ships()
-            self.game_active = True
-
-            # Get rid of any remaining bullets and aliens.
+            
+            self.title_screen_active = True
+            self.game_active = False
+            self.username_input_active = False
             self.bullets.empty()
             self.aliens.empty()
 
-            # Create a new fleet and center the ship.
             self._create_fleet()
             self.ship.center_ship()
 
-            # Hide the mouse cursor.
             pygame.mouse.set_visible(False)
 
     def _check_keydown_events(self, event):
@@ -248,7 +242,7 @@ class AlienInvasion:
         elif event.key == pygame.K_LEFT:
             self.ship.moving_left = True
         elif event.key == pygame.K_q:
-            self._save_high_scores() # Ensure scores are saved before exiting
+            self._save_high_scores() 
             sys.exit()
         elif event.key == pygame.K_SPACE:
             self._fire_bullet()
@@ -268,10 +262,8 @@ class AlienInvasion:
 
     def _update_bullets(self):
         """Update position of bullets and get rid of old bullets."""
-        # Update bullet positions.
         self.bullets.update()
 
-        # Get rid of bullets that have disappeared.
         for bullet in self.bullets.copy():
             if bullet.rect.bottom <= 0:
                 self.bullets.remove(bullet)
@@ -280,7 +272,6 @@ class AlienInvasion:
 
     def _check_bullet_alien_collisions(self):
         """Respond to bullet-alien collisions."""
-        # Remove any bullets and aliens that have collided.
         collisions = pygame.sprite.groupcollide(
                 self.bullets, self.aliens, True, True)
 
@@ -291,12 +282,10 @@ class AlienInvasion:
             self.sb.check_high_score()
 
         if not self.aliens:
-            # Destroy existing bullets and create new fleet.
             self.bullets.empty()
             self._create_fleet()
             self.settings.increase_speed()
 
-            # Increase level.
             self.stats.level += 1
             self.sb.prep_level()
 
@@ -308,58 +297,45 @@ class AlienInvasion:
         self._check_fleet_edges()
         self.aliens.update()
 
-        # Look for alien-ship collisions.
         if pygame.sprite.spritecollideany(self.ship, self.aliens):
             self._ship_hit()
 
-        # Look for aliens hitting the bottom of the screen.
         self._check_aliens_bottom()
 
     def _ship_hit(self):
         """Respond to the ship being hit by an alien."""
         if self.stats.ships_left > 0:
-            # Decrement ships_left, and update scoreboard.
             self.stats.ships_left -= 1
             self.sb.prep_ships()
 
-            # Get rid of any remaining bullets and aliens.
             self.bullets.empty()
             self.aliens.empty()
 
-            # Create a new fleet and center the ship.
             self._create_fleet()
             self.ship.center_ship()
 
-            # Pause.
             sleep(0.5)
         else:
             self.game_active = False
             pygame.mouse.set_visible(True)
-            # Save score
-            if self.username: # Ensure there's a username
+            if self.username:
                 current_high_score = self.high_scores.get(self.username, 0)
                 if self.stats.score > current_high_score:
                     self.high_scores[self.username] = self.stats.score
-                # Update overall high score for display if necessary
                 if self.stats.score > self.stats.high_score:
-                    self.stats.high_score = self.stats.score # This updates the general high score
-                    self.sb.prep_high_score() # Update display
-                # self._save_high_scores() # Optional: save to file immediately
+                    self.stats.high_score = self.stats.score
+                    self.sb.prep_high_score()
+                
+                self._submit_score_to_global_leaderboard(self.username, self.stats.score) 
             
-            # Reset for next username input
-            self.username_input_active = True
-            # self.username = "" # Keep username or clear? For now, keep for convenience if playing again.
             self.user_input = ""
-            # After game over, return to title screen instead of username input directly
             self.title_screen_active = True
-            self.game_active = False # Ensure game_active is false
-            self.username_input_active = False # Ensure this is false too
+            self.username_input_active = False
+            self._load_global_leaderboard() 
 
 
     def _create_fleet(self):
         """Create the fleet of aliens."""
-        # Create an alien and keep adding aliens until there's no room left.
-        # Spacing between aliens is one alien width and one alien height.
         alien = Alien(self)
         alien_width, alien_height = alien.rect.size
 
@@ -369,7 +345,6 @@ class AlienInvasion:
                 self._create_alien(current_x, current_y)
                 current_x += 2 * alien_width
 
-            # Finished a row; reset x value, and increment y value.
             current_x = alien_width
             current_y += 2 * alien_height
 
@@ -399,7 +374,6 @@ class AlienInvasion:
         screen_rect = self.screen.get_rect()
         for alien in self.aliens.sprites():
             if alien.rect.bottom >= screen_rect.bottom:
-                # Treat this the same as if the ship got hit.
                 self._ship_hit()
                 break
 
@@ -415,36 +389,53 @@ class AlienInvasion:
         try:
             with open(filename) as f:
                 self.high_scores = json.load(f)
-                # Ensure stats.high_score is updated with the loaded global high score
                 if self.high_scores:
-                    # Find the overall highest score from the loaded dictionary
-                    # This assumes self.stats.high_score should reflect the highest score ever,
-                    # not just the current user's. If it's per user, this logic changes.
-                    # For now, let's assume it's the global highest.
-                    # This might be better handled when sb.prep_high_score() is called.
-                    # Let's ensure GameStats initializes high_score from loaded data if needed.
-                    # For simplicity, we can update stats.high_score when a new high score is made
-                    # or when loading. Scoreboard will use stats.high_score.
-                    # Let's find the max score from the loaded dictionary to set the initial overall high score.
-                    # This is a bit simplistic as GameStats also tries to load 'high_score.txt'
-                    # We should consolidate high score loading.
-                    # For now, we'll leave GameStats to manage its own high_score.txt loading.
-                    # and self.high_scores is for {user: score}.
-                    # The scoreboard will show self.stats.high_score.
-                    # When a user gets a new score, we update self.high_scores[user]
-                    # AND self.stats.high_score if it's a new global high.
-                    pass # GameStats handles its own high_score.txt loading.
+                    pass 
         except FileNotFoundError:
             pass
-        except json.JSONDecodeError: # Handle empty or corrupted file
+        except json.JSONDecodeError: 
             self.high_scores = {}
 
+    def _load_global_leaderboard(self):
+        """Load global leaderboard data from the server."""
+        try:
+            response = requests.get(f"{self.server_url}/api/leaderboard", timeout=5)
+            response.raise_for_status()  
+            self.global_leaderboard_data = response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Error loading global leaderboard: {e}")
+            self.global_leaderboard_data = [] 
+        except json.JSONDecodeError:
+            print("Error: Could not decode JSON from leaderboard server.")
+            self.global_leaderboard_data = []
+
+        self._prepare_leaderboard_images()
+
+    def _prepare_leaderboard_images(self):
+        """Create rendered text images for the global leaderboard."""
+        self.global_leaderboard_images = []
+        display_data = self.global_leaderboard_data[:self.max_leaderboard_entries]
+        for i, entry in enumerate(display_data):
+            username = entry.get('username', 'Unknown')
+            score = entry.get('score', 0)
+            text = f"{i + 1}. {username}: {score:,}"
+            image = self.leaderboard_font.render(text, True, self.settings.text_color, self.settings.bg_color)
+            self.global_leaderboard_images.append(image)
+
+    def _submit_score_to_global_leaderboard(self, username, score):
+        """Submit score to the global leaderboard server."""
+        try:
+            payload = {"username": username, "score": score}
+            response = requests.post(f"{self.server_url}/api/scores", json=payload, timeout=5)
+            response.raise_for_status()
+            print(f"Score submission response: {response.json().get('message')}")
+        except requests.exceptions.RequestException as e:
+            print(f"Error submitting score to global leaderboard: {e}")
 
     def _draw_title_screen(self):
         """Draw the title screen elements."""
         self.screen.fill(self.settings.bg_color)
         
-        # Title
         title_text = "Alien Invasion"
         title_image = self.title_font.render(title_text, True, self.settings.text_color, self.settings.bg_color)
         title_rect = title_image.get_rect()
@@ -452,86 +443,86 @@ class AlienInvasion:
         title_rect.top = 100
         self.screen.blit(title_image, title_rect)
 
-        # Alien Image
         if self.alien_title_image:
             alien_rect = self.alien_title_image.get_rect()
             alien_rect.centerx = self.screen_rect.centerx
-            alien_rect.top = title_rect.bottom + 20 # Position alien below title
+            alien_rect.top = title_rect.bottom + 20 
             self.screen.blit(self.alien_title_image, alien_rect)
-            current_top = alien_rect.bottom + 50 # Start buttons below alien image
+            current_top = alien_rect.bottom + 50 
         else:
-            current_top = title_rect.bottom + 50 # Start buttons below title if no image
+            current_top = title_rect.bottom + 50 
 
-        # Buttons - Vertically stacked and centered
-        button_spacing = 20 # Vertical space between buttons
+        button_spacing = 20 
 
-        # Start Game Button (already labeled "Start Game")
         self.start_button.rect.centerx = self.screen_rect.centerx
         self.start_button.rect.top = current_top
         self.start_button.draw_button()
 
-        # Settings Button (already labeled "Settings")
         current_top += self.start_button.rect.height + button_spacing
         self.settings_button.rect.centerx = self.screen_rect.centerx
         self.settings_button.rect.top = current_top
         self.settings_button.draw_button()
         
-        # Exit Button (already labeled "Exit")
         current_top += self.settings_button.rect.height + button_spacing
         self.exit_button.rect.centerx = self.screen_rect.centerx
         self.exit_button.rect.top = current_top
         self.exit_button.draw_button()
+
+        leaderboard_title_text = "Global Leaderboard"
+        leaderboard_title_image = self.font.render(leaderboard_title_text, True, self.settings.text_color, self.settings.bg_color)
+        leaderboard_title_rect = leaderboard_title_image.get_rect()
+        leaderboard_title_rect.centerx = self.screen_rect.centerx
+        leaderboard_title_rect.top = self.exit_button.rect.bottom + 40 
+        self.screen.blit(leaderboard_title_image, leaderboard_title_rect)
+
+        leaderboard_y_start = leaderboard_title_rect.bottom + 15
+        for i, image in enumerate(self.global_leaderboard_images):
+            image_rect = image.get_rect()
+            image_rect.centerx = self.screen_rect.centerx
+            image_rect.top = leaderboard_y_start + (i * (self.leaderboard_font.get_height() + 5))
+            self.screen.blit(image, image_rect)
         
         pygame.mouse.set_visible(True)
-
 
     def _draw_settings_page(self):
         """Draw the settings page with sliders."""
         self.screen.fill(self.settings.bg_color)
         
-        # Settings Title
         settings_title_img = self.title_font.render("Settings", True, self.settings.text_color, self.settings.bg_color)
         settings_title_rect = settings_title_img.get_rect()
         settings_title_rect.centerx = self.screen_rect.centerx
         settings_title_rect.top = 50
         self.screen.blit(settings_title_img, settings_title_rect)
 
-        # Draw all sliders
         for slider in self.settings_sliders:
             slider.draw()
         
-        # Position Back button at the bottom
         self.back_button.rect.centerx = self.screen_rect.centerx
         self.back_button.rect.bottom = self.screen_rect.bottom - 30
         self.back_button.draw_button()
         
         pygame.mouse.set_visible(True)
 
-
     def _draw_username_input(self):
         """Draw the username input field on the screen."""
-        self.screen.fill(self.settings.bg_color) # Clear screen for this state
+        self.screen.fill(self.settings.bg_color) 
         prompt_text = "Enter Username (Press Enter to Confirm):"
         prompt_image = self.font.render(prompt_text, True, self.settings.text_color, self.settings.bg_color)
         prompt_rect = prompt_image.get_rect()
         prompt_rect.centerx = self.screen_rect.centerx
-        prompt_rect.centery = self.screen_rect.centery - 80 # Move prompt up
+        prompt_rect.centery = self.screen_rect.centery - 80 
 
-        # Define the visual input field box
-        input_field_width = 300 # Wider to accommodate text, user asked for 100px visual
+        input_field_width = 300 
         input_field_height = 50
-        self.input_field_rect = pygame.Rect(0, 0, input_field_width, input_field_height) # Store as attribute
+        self.input_field_rect = pygame.Rect(0, 0, input_field_width, input_field_height) 
         self.input_field_rect.centerx = self.screen_rect.centerx
-        self.input_field_rect.centery = self.screen_rect.centery - 25 # Position below prompt
+        self.input_field_rect.centery = self.screen_rect.centery - 25 
         
-        # Draw the visual box for the input field
-        pygame.draw.rect(self.screen, (230, 230, 230), self.input_field_rect) # Light gray box
-        pygame.draw.rect(self.screen, (0,0,0), self.input_field_rect, 2) # Black border
+        pygame.draw.rect(self.screen, (230, 230, 230), self.input_field_rect) 
+        pygame.draw.rect(self.screen, (0,0,0), self.input_field_rect, 2) 
 
-        # Render and position the actual user input text
-        input_text_image = self.font.render(self.user_input, True, (0,0,0), (230,230,230)) # Black text on light gray
+        input_text_image = self.font.render(self.user_input, True, (0,0,0), (230,230,230)) 
         input_text_rect = input_text_image.get_rect()
-        # Position text slightly inside the left of the input_field_rect
         input_text_rect.left = self.input_field_rect.left + 10 
         input_text_rect.centery = self.input_field_rect.centery
         
@@ -540,6 +531,79 @@ class AlienInvasion:
         
         pygame.mouse.set_visible(True)
 
+    def _start_sse_listener(self):
+        """Starts the SSE client in a separate thread."""
+        if not self.sse_client_running and (self.sse_thread is None or not self.sse_thread.is_alive()): 
+            self.sse_client_running = True
+            self.leaderboard_update_pending = False 
+            self.sse_thread = threading.Thread(target=self._listen_for_leaderboard_updates, daemon=True)
+            self.sse_thread.start()
+            print("SSE listener thread started.")
+        elif self.sse_thread and not self.sse_thread.is_alive():
+            print("SSE thread was not alive. Attempting to restart.")
+            self.sse_client_running = True 
+            self.leaderboard_update_pending = False
+            self.sse_thread = threading.Thread(target=self._listen_for_leaderboard_updates, daemon=True)
+            self.sse_thread.start()
+
+    def _listen_for_leaderboard_updates(self):
+        """Listens for SSE messages from the server."""
+        stream_url = f"{self.server_url}/stream"
+        print(f"SSE client: Connecting to {stream_url}...")
+        
+        while self.sse_client_running:
+            try:
+                with requests.get(stream_url, stream=True, timeout=(5.0, 15.0)) as response: 
+                    response.raise_for_status() 
+                    print(f"SSE client: Connected to {stream_url}. Waiting for messages...")
+                    for line in response.iter_lines(): 
+                        if not self.sse_client_running: 
+                            print("SSE client: sse_client_running is false, breaking inner loop.")
+                            break
+                        if line:
+                            decoded_line = line.decode('utf-8')
+                            if decoded_line.startswith('data:'):
+                                try:
+                                    message_data = decoded_line[len('data:'):].strip()
+                                    if not message_data: 
+                                        continue
+                                    message = json.loads(message_data)
+                                    print(f"SSE client: Message received: {message}")
+                                    if message.get("type") == "leaderboard_update":
+                                        print("SSE client: Leaderboard update message received. Setting pending flag.")
+                                        self.leaderboard_update_pending = True
+                                    elif message.get("type") == "connection_ack":
+                                        print(f"SSE client: Connection Acknowledged: {message.get('message')}")
+                                except json.JSONDecodeError:
+                                    print(f"SSE client: Could not decode JSON: '{message_data}' from line '{decoded_line}'")
+                                except Exception as e_json:
+                                    print(f"SSE client: Error processing message data '{message_data}': {e_json}")
+                    
+                    if not self.sse_client_running:
+                        print("SSE client: sse_client_running is false, exiting after iter_lines.")
+                        break 
+                    else:
+                        print("SSE client: Stream ended. Will attempt to reconnect if client is still running.")
+
+            except requests.exceptions.ConnectionError as e_conn:
+                if self.sse_client_running:
+                    print(f"SSE client: Connection failed: {e_conn}. Retrying in 5 seconds...")
+            except requests.exceptions.Timeout as e_timeout:
+                if self.sse_client_running:
+                    print(f"SSE client: Connection timed out: {e_timeout}. Retrying in 5 seconds...")
+            except requests.exceptions.RequestException as e_req:
+                if self.sse_client_running: 
+                    print(f"SSE client: Request error: {e_req}. Retrying in 5 seconds...")
+            except Exception as e_generic: 
+                if self.sse_client_running:
+                    print(f"SSE client: Unexpected error in listener: {e_generic}. Retrying in 10 seconds...")
+            
+            if self.sse_client_running: 
+                time.sleep(5) 
+            else:
+                break 
+
+        print("SSE listener thread finished.")
 
     def _update_screen(self):
         """Update images on the screen, and flip to the new screen."""
@@ -552,27 +616,21 @@ class AlienInvasion:
         elif self.username_input_active:
             self._draw_username_input()
         elif self.game_active:
-            # Draw game elements only if username input is done and game is active
             for bullet in self.bullets.sprites():
                 bullet.draw_bullet()
             self.ship.blitme()
             self.aliens.draw(self.screen)
             self.sb.show_score()
-            # Mouse should be hidden during gameplay (set in _check_play_button)
-        else: # Not game_active, not title, not settings, not username input
-              # This is the state after username is entered, before Play is clicked
-            if self.username: # Only show Play button if a username has been entered
-                self.sb.show_score() # Show score/high score even on this screen
+        else: 
+            if self.username: 
+                self.sb.show_score() 
                 self.play_button.draw_button()
-            else: # Should not happen if flow is correct, but as a fallback:
-                # This could be a state where username was cleared or not entered
-                # Re-direct to username input or title screen might be an option
-                self._draw_username_input() # Or self.title_screen_active = True
+            else: 
+                self._draw_username_input() 
 
         pygame.display.flip()
 
 
 if __name__ == '__main__':
-    # Make a game instance, and run the game.
     ai = AlienInvasion()
     ai.run_game()

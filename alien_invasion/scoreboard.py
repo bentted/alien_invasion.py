@@ -15,11 +15,9 @@ class Scoreboard:
         self.settings = ai_game.settings
         self.stats = ai_game.stats
 
-        # Font settings for scoring information.
         self.text_color = (30, 30, 30)
         self.font = pygame.font.SysFont(None, 48)
 
-        # Prepare the initial score images.
         self.prep_score()
         self.prep_high_score()
         self.prep_level()
@@ -27,25 +25,19 @@ class Scoreboard:
 
     def prep_score(self):
         """Turn the score into a rendered image, including the username."""
-        username = self.ai_game.username  # Access username from the AlienInvasion instance
+        username = self.ai_game.username  
         
-        # Ensure score is rounded and formatted as before
         rounded_score = round(self.stats.score, -1)
         score_value_str = f"{rounded_score:,}"
 
         if username:
-            # Prepend username if it exists
             score_display_str = f"{username}: {score_value_str}"
         else:
-            # Fallback to just the score if no username is set
-            score_display_str = score_value_str
-            
-        # Render the text (assuming self.text_color and self.settings.bg_color are available)
-        # If self.text_color is not an attribute, you might need to use self.settings.text_color
-        self.score_image = self.font.render(score_display_str, True,
-                                             self.text_color, self.settings.bg_color)
+            score_display_str = score_value_str 
 
-        # Position the score at the top right, adjust if necessary due to longer text
+        self.score_image = self.font.render(score_display_str, True,
+                self.text_color, self.settings.bg_color)
+
         self.score_rect = self.score_image.get_rect()
         self.score_rect.right = self.screen_rect.right - 20
         self.score_rect.top = 20
@@ -56,11 +48,16 @@ class Scoreboard:
         high_score_str = f"{high_score:,}"
         self.high_score_image = self.font.render(high_score_str, True,
                 self.text_color, self.settings.bg_color)
-        
-        # Center the high score at the top of the screen.
+            
         self.high_score_rect = self.high_score_image.get_rect()
         self.high_score_rect.centerx = self.screen_rect.centerx
         self.high_score_rect.top = self.score_rect.top
+
+    def check_high_score(self):
+        """Check to see if there's a new high score."""
+        if self.stats.score > self.stats.high_score:
+            self.stats.high_score = self.stats.score
+            self.prep_high_score()
 
     def prep_level(self):
         """Turn the level into a rendered image."""
@@ -68,7 +65,6 @@ class Scoreboard:
         self.level_image = self.font.render(level_str, True,
                 self.text_color, self.settings.bg_color)
 
-        # Position the level below the score.
         self.level_rect = self.level_image.get_rect()
         self.level_rect.right = self.score_rect.right
         self.level_rect.top = self.score_rect.bottom + 10
@@ -81,12 +77,6 @@ class Scoreboard:
             ship.rect.x = 10 + ship_number * ship.rect.width
             ship.rect.y = 10
             self.ships.add(ship)
-
-    def check_high_score(self):
-        """Check to see if there's a new high score."""
-        if self.stats.score > self.stats.high_score:
-            self.stats.high_score = self.stats.score
-            self.prep_high_score()
 
     def show_score(self):
         """Draw scores, level, and ships to the screen."""

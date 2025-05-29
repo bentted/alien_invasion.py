@@ -1,5 +1,4 @@
 import pygame
-import pygame.font
 
 class Slider:
     """A class to create and manage a slider widget."""
@@ -71,22 +70,18 @@ class Slider:
 
     def draw(self):
         """Draw the slider on the screen."""
-        # Draw slider bar
         pygame.draw.rect(self.screen, self.slider_color, self.rect)
         pygame.draw.rect(self.screen, (0,0,0), self.rect, 1) # Border for slider bar
 
-        # Draw handle
         pygame.draw.rect(self.screen, self.handle_color, self.handle_rect)
         pygame.draw.rect(self.screen, (0,0,0), self.handle_rect, 1) # Border for handle
 
-        # Draw name label
         name_img = self.font.render(f"{self.name}:", True, self.text_color)
         name_rect = name_img.get_rect()
         name_rect.right = self.rect.left - 10 # 10px padding to the left of slider
         name_rect.centery = self.rect.centery
         self.screen.blit(name_img, name_rect)
 
-        # Draw value label
         if self.is_float:
             self.value_text = f"{self.current_val:.1f}" # Display floats with 1 decimal place
         else:
