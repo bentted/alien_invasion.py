@@ -5,6 +5,8 @@ import requests
 import pygame
 import os 
 import threading
+import random
+import string
 
 
 from settings import Settings
@@ -49,12 +51,14 @@ class AlienInvasion:
         self.settings_page_active = False
         self.username_input_active = False 
         self.game_active = False
+        self.level_code_input_active = False
 
         self.play_button = Button(self, "Play")
         
         self.start_button = Button(self, "Start Game")
         self.settings_button = Button(self, "Settings")
         self.exit_button = Button(self, "Exit")
+        self.level_code_button = Button(self, "Enter Level Code")
         
         self.back_button = Button(self, "Back")
 
@@ -79,6 +83,8 @@ class AlienInvasion:
         self.leaderboard_update_pending = False
         self.sse_thread = None
         
+        self.level_codes = {}  # Store level codes
+
         self._load_global_leaderboard() 
         self._start_sse_listener() 
 
@@ -168,10 +174,19 @@ class AlienInvasion:
                     self._check_keydown_events(event)
                 elif event.type == pygame.KEYUP:
                     self._check_keyup_events(event)
+            elif self.level_code_input_active:
+                if event.type == pygame.KEYDOWN:
+                    self._handle_level_code_input(event)
             else:  
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     mouse_pos = pygame.mouse.get_pos()
                     self._check_play_button(mouse_pos)
+
+    def _generate_level_code(self, level):
+        """Generate a unique code for the given level."""
+        code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+        self.level_codes[code] = level
+        return code
 
     def _check_title_screen_buttons(self, mouse_pos):
         """Check if any title screen buttons were clicked."""
@@ -185,6 +200,9 @@ class AlienInvasion:
         elif self.exit_button.rect.collidepoint(mouse_pos):
             self._save_high_scores()
             sys.exit()
+        elif self.level_code_button.rect.collidepoint(mouse_pos):
+            self.title_screen_active = False
+            self.level_code_input_active = True
 
     def _check_settings_page_buttons(self, mouse_pos):
         """Check if any settings page buttons were clicked."""
@@ -202,6 +220,7 @@ class AlienInvasion:
                 self.user_input = "" 
                 self.sb.prep_score() 
                 self.sb.prep_high_score() 
+                self.sb.prep_level()  # Prepare the level display
                 self.title_screen_active = False
                 self.settings_page_active = False
                 self.game_active = False
@@ -209,6 +228,42 @@ class AlienInvasion:
             self.user_input = self.user_input[:-1]
         elif len(self.user_input) < 20: 
             self.user_input += event.unicode
+
+    def _handle_level_code_input(self, event):
+        """Handle keypresses during level code input."""
+        if event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER:
+            if self.level_code_input in self.level_codes:
+                self.stats.level = self.level_codes[self.level_code_input]
+                self.settings.initialize_dynamic_settings()
+                for _ in range(self.stats.level - 1):
+                    self.settings.increase_speed()
+                self.level_code_input_active = False
+                self.title_screen_active = False
+                self.game_active = True
+                self._start_new_game()
+            else:
+                print("Invalid level code.")
+                self.level_code_input = ""
+        elif event.key == pygame.K_BACKSPACE:
+            self.level_code_input = self.level_code_input[:-1]
+        elif len(self.level_code_input) < 10:
+            self.level_code_input += event.unicode
+
+    def _start_new_game(self):
+        """Start a new game."""
+        self.stats.reset_stats()
+        self.sb.prep_score()
+        self.sb.prep_high_score()
+        self.sb.prep_level()
+        self.sb.prep_ships()
+
+        self.bullets.empty()
+        self.aliens.empty()
+
+        self._create_fleet()
+        self.ship.center_ship()
+
+        pygame.mouse.set_visible(False)
 
     def _check_play_button(self, mouse_pos):
         """Start a new game when the player clicks Play (original button)."""
@@ -287,7 +342,10 @@ class AlienInvasion:
             self.settings.increase_speed()
 
             self.stats.level += 1
-            self.sb.prep_level()
+            self.sb.prep_level()  # Update the level display
+            level_code = self._generate_level_code(self.stats.level)
+            print(f"Level {self.stats.level} completed! Your level code is: {level_code}")
+        # ...existing code...
 
     def _update_aliens(self):
         """
@@ -418,14 +476,15 @@ class AlienInvasion:
         for i, entry in enumerate(display_data):
             username = entry.get('username', 'Unknown')
             score = entry.get('score', 0)
-            text = f"{i + 1}. {username}: {score:,}"
+            level = entry.get('level', 1)  # Default level to 1 if not provided
+            text = f"{i + 1}. {username}: {score:,} (Level {level})"
             image = self.leaderboard_font.render(text, True, self.settings.text_color, self.settings.bg_color)
             self.global_leaderboard_images.append(image)
 
     def _submit_score_to_global_leaderboard(self, username, score):
         """Submit score to the global leaderboard server."""
         try:
-            payload = {"username": username, "score": score}
+            payload = {"username": username, "score": score, "level": self.stats.level}  # Include level in payload
             response = requests.post(f"{self.server_url}/api/scores", json=payload, timeout=5)
             response.raise_for_status()
             print(f"Score submission response: {response.json().get('message')}")
@@ -467,6 +526,11 @@ class AlienInvasion:
         self.exit_button.rect.centerx = self.screen_rect.centerx
         self.exit_button.rect.top = current_top
         self.exit_button.draw_button()
+
+        current_top += self.exit_button.rect.height + button_spacing
+        self.level_code_button.rect.centerx = self.screen_rect.centerx
+        self.level_code_button.rect.top = current_top
+        self.level_code_button.draw_button()
 
         leaderboard_title_text = "Global Leaderboard"
         leaderboard_title_image = self.font.render(leaderboard_title_text, True, self.settings.text_color, self.settings.bg_color)
@@ -529,6 +593,34 @@ class AlienInvasion:
         self.screen.blit(prompt_image, prompt_rect)
         self.screen.blit(input_text_image, input_text_rect)
         
+        pygame.mouse.set_visible(True)
+
+    def _draw_level_code_input(self):
+        """Draw the level code input field on the screen."""
+        self.screen.fill(self.settings.bg_color)
+        prompt_text = "Enter Level Code (Press Enter to Confirm):"
+        prompt_image = self.font.render(prompt_text, True, self.settings.text_color, self.settings.bg_color)
+        prompt_rect = prompt_image.get_rect()
+        prompt_rect.centerx = self.screen_rect.centerx
+        prompt_rect.centery = self.screen_rect.centery - 80
+
+        input_field_width = 300
+        input_field_height = 50
+        self.input_field_rect = pygame.Rect(0, 0, input_field_width, input_field_height)
+        self.input_field_rect.centerx = self.screen_rect.centerx
+        self.input_field_rect.centery = self.screen_rect.centery - 25
+
+        pygame.draw.rect(self.screen, (230, 230, 230), self.input_field_rect)
+        pygame.draw.rect(self.screen, (0, 0, 0), self.input_field_rect, 2)
+
+        input_text_image = self.font.render(self.level_code_input, True, (0, 0, 0), (230, 230, 230))
+        input_text_rect = input_text_image.get_rect()
+        input_text_rect.left = self.input_field_rect.left + 10
+        input_text_rect.centery = self.input_field_rect.centery
+
+        self.screen.blit(prompt_image, prompt_rect)
+        self.screen.blit(input_text_image, input_text_rect)
+
         pygame.mouse.set_visible(True)
 
     def _start_sse_listener(self):
@@ -615,12 +707,15 @@ class AlienInvasion:
             self._draw_settings_page()
         elif self.username_input_active:
             self._draw_username_input()
+        elif self.level_code_input_active:
+            self._draw_level_code_input()
         elif self.game_active:
             for bullet in self.bullets.sprites():
                 bullet.draw_bullet()
             self.ship.blitme()
             self.aliens.draw(self.screen)
             self.sb.show_score()
+            self.sb.show_level()  # Display the level
         else: 
             if self.username: 
                 self.sb.show_score() 
