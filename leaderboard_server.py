@@ -1,8 +1,9 @@
-from flask import Flask, request, jsonify, Response 
+from flask import Flask, request, jsonify, Response
 from flask_sqlalchemy import SQLAlchemy
 import os
-import time 
-import json 
+import time
+import json
+from stem.control import Controller  # Add Stem for Tor control
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 DATABASE_PATH = os.path.join(script_dir, 'leaderboard.db')
@@ -12,7 +13,8 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + DATABASE_PATH
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
-sse_message_queue = [] 
+sse_message_queue = []
+chat_message_queue = []  # Queue to store chat messages
 
 class Score(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -129,8 +131,33 @@ def admin_unban_user(username):
     else:
         return jsonify({'error': f'User {username} not found'}), 404
 
+@app.route('/api/chat', methods=['POST'])
+def send_chat_message():
+    """Receive a chat message from a client and broadcast it."""
+    data = request.get_json()
+    if not data or 'username' not in data or 'message' not in data:
+        return jsonify({'error': 'Invalid data. Username and message are required.'}), 400
+
+    username = data['username']
+    message = data['message']
+    chat_message = json.dumps({"type": "chat_message", "username": username, "message": message})
+    
+    chat_message_queue.append(chat_message)
+    if len(chat_message_queue) > 50:  # Limit the chat queue to the last 50 messages
+        chat_message_queue.pop(0)
+
+    sse_message_queue.append(chat_message)  # Add the chat message to the SSE queue for broadcasting
+    return jsonify({'message': 'Chat message sent successfully'}), 200
+
+@app.route('/api/chat', methods=['GET'])
+def get_chat_messages():
+    """Retrieve the last 50 chat messages."""
+    messages = [json.loads(msg) for msg in chat_message_queue]
+    return jsonify(messages), 200
+
 @app.route('/stream') 
 def stream():
+    """Stream SSE messages, including chat and leaderboard updates."""
     def event_stream():
         yield 'data: {{"type": "connection_ack", "message": "SSE connection established"}}\n\n'
         client_last_sent_index = len(sse_message_queue) 
@@ -152,7 +179,31 @@ def stream():
     response.headers['X-Accel-Buffering'] = 'no' 
     return response
 
+def setup_tor_hidden_service():
+    """Configure and start a Tor hidden service."""
+    try:
+        with Controller.from_port(port=9051) as controller:
+            controller.authenticate(password="your_tor_control_password")  # Replace with your Tor control password
+            response = controller.create_hidden_service(
+                ports={80: 5000},  # Map hidden service port 80 to local port 5000
+                key_type="NEW",
+                key_content="ED25519-V3"
+            )
+            onion_address = response.service_id + ".onion"
+            print(f"Tor hidden service is running at: {onion_address}")
+            return onion_address
+    except Exception as e:
+        print(f"Error setting up Tor hidden service: {e}")
+        return None
+
 if __name__ == '__main__':
     with app.app_context():
-        db.create_all() 
+        db.create_all()
+
+    onion_address = setup_tor_hidden_service()
+    if onion_address:
+        print(f"Server is accessible via Tor at: {onion_address}")
+    else:
+        print("Failed to set up Tor hidden service. Running server without Tor.")
+
     app.run(debug=True)
