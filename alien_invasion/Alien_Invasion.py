@@ -2,6 +2,7 @@ import sys
 from time import sleep, time
 import json
 import requests
+from stem.control import Controller  # Add Stem for Tor control
 import pygame
 import os
 import threading
@@ -82,7 +83,9 @@ class AlienInvasion:
             self.alien_title_image = None
 
         self._initialize_settings_sliders()
-        self.server_url = "http://127.0.0.1:5000"
+        self.server_url = "http://127.0.0.1:5000"  # Default server URL
+        self.use_tor = False  # Flag to determine if Tor should be used
+        self.tor_proxy = "socks5h://127.0.0.1:9050"  # Default Tor proxy address
 
         self.sse_client_running = False
         self.leaderboard_update_pending = False
@@ -419,12 +422,16 @@ class AlienInvasion:
     def _load_global_leaderboard(self):
         """Load global leaderboard data from the server."""
         try:
-            response = requests.get(f"{self.server_url}/api/leaderboard", timeout=5)
-            response.raise_for_status()  
+            if self.use_tor and ".onion" in self.server_url:
+                proxies = {"http": self.tor_proxy, "https": self.tor_proxy}
+                response = requests.get(f"{self.server_url}/api/leaderboard", proxies=proxies, timeout=10)
+            else:
+                response = requests.get(f"{self.server_url}/api/leaderboard", timeout=5)
+            response.raise_for_status()
             self.global_leaderboard_data = response.json()
         except requests.exceptions.RequestException as e:
             print(f"Error loading global leaderboard: {e}")
-            self.global_leaderboard_data = [] 
+            self.global_leaderboard_data = []
         except json.JSONDecodeError:
             print("Error: Could not decode JSON from leaderboard server.")
             self.global_leaderboard_data = []
@@ -446,192 +453,88 @@ class AlienInvasion:
         """Submit score to the global leaderboard server."""
         try:
             payload = {"username": username, "score": score}
-            response = requests.post(f"{self.server_url}/api/scores", json=payload, timeout=5)
+            if self.use_tor and ".onion" in self.server_url:
+                proxies = {"http": self.tor_proxy, "https": self.tor_proxy}
+                response = requests.post(f"{self.server_url}/api/scores", json=payload, proxies=proxies, timeout=10)
+            else:
+                response = requests.post(f"{self.server_url}/api/scores", json=payload, timeout=5)
             response.raise_for_status()
             print(f"Score submission response: {response.json().get('message')}")
         except requests.exceptions.RequestException as e:
             print(f"Error submitting score to global leaderboard: {e}")
 
-    def _draw_title_screen(self):
-        """Draw the title screen elements."""
-        self.screen.fill(self.settings.bg_color)
-        
-        title_text = "Alien Invasion"
-        title_image = self.title_font.render(title_text, True, self.settings.text_color, self.settings.bg_color)
-        title_rect = title_image.get_rect()
-        title_rect.centerx = self.screen_rect.centerx
-        title_rect.top = 100
-        self.screen.blit(title_image, title_rect)
-
-        if self.alien_title_image:
-            alien_rect = self.alien_title_image.get_rect()
-            alien_rect.centerx = self.screen_rect.centerx
-            alien_rect.top = title_rect.bottom + 20 
-            self.screen.blit(self.alien_title_image, alien_rect)
-            current_top = alien_rect.bottom + 50 
-        else:
-            current_top = title_rect.bottom + 50 
-
-        button_spacing = 20 
-
-        self.start_button.rect.centerx = self.screen_rect.centerx
-        self.start_button.rect.top = current_top
-        self.start_button.draw_button()
-
-        current_top += self.start_button.rect.height + button_spacing
-        self.settings_button.rect.centerx = self.screen_rect.centerx
-        self.settings_button.rect.top = current_top
-        self.settings_button.draw_button()
-        
-        current_top += self.settings_button.rect.height + button_spacing
-        self.exit_button.rect.centerx = self.screen_rect.centerx
-        self.exit_button.rect.top = current_top
-        self.exit_button.draw_button()
-
-        current_top += self.exit_button.rect.height + button_spacing
-        self.level_code_button.rect.centerx = self.screen_rect.centerx
-        self.level_code_button.rect.top = current_top
-        self.level_code_button.draw_button()
-
-        current_top += self.level_code_button.rect.height + button_spacing
-        self.high_score_mode_button.rect.centerx = self.screen_rect.centerx
-        self.high_score_mode_button.rect.top = current_top
-        self.high_score_mode_button.draw_button()
-
-        leaderboard_title_text = "Global Leaderboard"
-        leaderboard_title_image = self.font.render(leaderboard_title_text, True, self.settings.text_color, self.settings.bg_color)
-        leaderboard_title_rect = leaderboard_title_image.get_rect()
-        leaderboard_title_rect.centerx = self.screen_rect.centerx
-        leaderboard_title_rect.top = self.exit_button.rect.bottom + 40
-        self.screen.blit(leaderboard_title_image, leaderboard_title_rect)
-
-        leaderboard_y_start = leaderboard_title_rect.bottom + 15
-        for i, image in enumerate(self.global_leaderboard_images):
-            image_rect = image.get_rect()
-            image_rect.centerx = self.screen_rect.centerx
-            image_rect.top = leaderboard_y_start + (i * (self.leaderboard_font.get_height() + 5))
-            self.screen.blit(image, image_rect)
-
-        pygame.mouse.set_visible(True)
-
-    def _draw_settings_page(self):
-        """Draw the settings page with sliders."""
-        self.screen.fill(self.settings.bg_color)
-        
-        settings_title_img = self.title_font.render("Settings", True, self.settings.text_color, self.settings.bg_color)
-        settings_title_rect = settings_title_img.get_rect()
-        settings_title_rect.centerx = self.screen_rect.centerx
-        settings_title_rect.top = 50
-        self.screen.blit(settings_title_img, settings_title_rect)
-
-        for slider in self.settings_sliders:
-            slider.draw()
-        
-        self.back_button.rect.centerx = self.screen_rect.centerx
-        self.back_button.rect.bottom = self.screen_rect.bottom - 30
-        self.back_button.draw_button()
-        
-        pygame.mouse.set_visible(True)
-
-    def _draw_username_input(self):
-        """Draw the username input field on the screen."""
-        self.screen.fill(self.settings.bg_color) 
-        prompt_text = "Enter Username (Press Enter to Confirm):"
-        prompt_image = self.font.render(prompt_text, True, self.settings.text_color, self.settings.bg_color)
-        prompt_rect = prompt_image.get_rect()
-        prompt_rect.centerx = self.screen_rect.centerx
-        prompt_rect.centery = self.screen_rect.centery - 80 
-
-        input_field_width = 300 
-        input_field_height = 50
-        self.input_field_rect = pygame.Rect(0, 0, input_field_width, input_field_height) 
-        self.input_field_rect.centerx = self.screen_rect.centerx
-        self.input_field_rect.centery = self.screen_rect.centery - 25 
-        
-        pygame.draw.rect(self.screen, (230, 230, 230), self.input_field_rect) 
-        pygame.draw.rect(self.screen, (0,0,0), self.input_field_rect, 2) 
-
-        input_text_image = self.font.render(self.user_input, True, (0,0,0), (230,230,230)) 
-        input_text_rect = input_text_image.get_rect()
-        input_text_rect.left = self.input_field_rect.left + 10 
-        input_text_rect.centery = self.input_field_rect.centery
-        
-        self.screen.blit(prompt_image, prompt_rect)
-        self.screen.blit(input_text_image, input_text_rect)
-        
-        pygame.mouse.set_visible(True)
-
-    def _start_sse_listener(self):
-        """Starts the SSE client in a separate thread."""
-        if not self.sse_client_running and (self.sse_thread is None or not self.sse_thread.is_alive()): 
-            self.sse_client_running = True
-            self.leaderboard_update_pending = False 
-            self.sse_thread = threading.Thread(target=self._listen_for_leaderboard_updates, daemon=True)
-            self.sse_thread.start()
-            print("SSE listener thread started.")
-        elif self.sse_thread and not self.sse_thread.is_alive():
-            print("SSE thread was not alive. Attempting to restart.")
-            self.sse_client_running = True 
-            self.leaderboard_update_pending = False
-            self.sse_thread = threading.Thread(target=self._listen_for_leaderboard_updates, daemon=True)
-            self.sse_thread.start()
-
     def _listen_for_leaderboard_updates(self):
         """Listens for SSE messages from the server."""
         stream_url = f"{self.server_url}/stream"
         print(f"SSE client: Connecting to {stream_url}...")
-        
+
         while self.sse_client_running:
             try:
-                with requests.get(stream_url, stream=True, timeout=(5.0, 15.0)) as response: 
-                    response.raise_for_status() 
-                    print(f"SSE client: Connected to {stream_url}. Waiting for messages...")
-                    for line in response.iter_lines(): 
-                        if not self.sse_client_running: 
-                            print("SSE client: sse_client_running is false, breaking inner loop.")
-                            break
-                        if line:
-                            decoded_line = line.decode('utf-8')
-                            if decoded_line.startswith('data:'):
-                                try:
-                                    message_data = decoded_line[len('data:'):].strip()
-                                    if not message_data: 
-                                        continue
-                                    message = json.loads(message_data)
-                                    print(f"SSE client: Message received: {message}")
-                                    if message.get("type") == "leaderboard_update":
-                                        print("SSE client: Leaderboard update message received. Setting pending flag.")
-                                        self.leaderboard_update_pending = True
-                                    elif message.get("type") == "connection_ack":
-                                        print(f"SSE client: Connection Acknowledged: {message.get('message')}")
-                                except json.JSONDecodeError:
-                                    print(f"SSE client: Could not decode JSON: '{message_data}' from line '{decoded_line}'")
-                                except Exception as e_json:
-                                    print(f"SSE client: Error processing message data '{message_data}': {e_json}")
+                if self.use_tor and ".onion" in self.server_url:
+                    proxies = {"http": self.tor_proxy, "https": self.tor_proxy}
+                    with requests.get(stream_url, stream=True, proxies=proxies, timeout=(10.0, 20.0)) as response:
+                        response.raise_for_status()
+                        print(f"SSE client: Connected to {stream_url}. Waiting for messages...")
+                        for line in response.iter_lines():
+                            if not self.sse_client_running:
+                                print("SSE client: sse_client_running is false, breaking inner loop.")
+                                break
+                            if line:
+                                decoded_line = line.decode('utf-8')
+                                if decoded_line.startswith('data:'):
+                                    try:
+                                        message_data = decoded_line[len('data:'):].strip()
+                                        if not message_data:
+                                            continue
+                                        message = json.loads(message_data)
+                                        print(f"SSE client: Message received: {message}")
+                                        if message.get("type") == "leaderboard_update":
+                                            print("SSE client: Leaderboard update message received. Setting pending flag.")
+                                            self.leaderboard_update_pending = True
+                                        elif message.get("type") == "connection_ack":
+                                            print(f"SSE client: Connection Acknowledged: {message.get('message')}")
+                                    except json.JSONDecodeError:
+                                        print(f"SSE client: Could not decode JSON: '{message_data}' from line '{decoded_line}'")
+                                    except Exception as e_json:
+                                        print(f"SSE client: Error processing message data '{message_data}': {e_json}")
+                else:
+                    with requests.get(stream_url, stream=True, timeout=(5.0, 15.0)) as response:
+                        response.raise_for_status()
+                        print(f"SSE client: Connected to {stream_url}. Waiting for messages...")
+                        for line in response.iter_lines():
+                            if not self.sse_client_running:
+                                print("SSE client: sse_client_running is false, breaking inner loop.")
+                                break
+                            if line:
+                                decoded_line = line.decode('utf-8')
+                                if decoded_line.startswith('data:'):
+                                    try:
+                                        message_data = decoded_line[len('data:'):].strip()
+                                        if not message_data:
+                                            continue
+                                        message = json.loads(message_data)
+                                        print(f"SSE client: Message received: {message}")
+                                        if message.get("type") == "leaderboard_update":
+                                            print("SSE client: Leaderboard update message received. Setting pending flag.")
+                                            self.leaderboard_update_pending = True
+                                        elif message.get("type") == "connection_ack":
+                                            print(f"SSE client: Connection Acknowledged: {message.get('message')}")
+                                    except json.JSONDecodeError:
+                                        print(f"SSE client: Could not decode JSON: '{message_data}' from line '{decoded_line}'")
+                                    except Exception as e_json:
+                                        print(f"SSE client: Error processing message data '{message_data}': {e_json}")
                     
-                    if not self.sse_client_running:
-                        print("SSE client: sse_client_running is false, exiting after iter_lines.")
-                        break 
-                    else:
-                        print("SSE client: Stream ended. Will attempt to reconnect if client is still running.")
-
-            except requests.exceptions.ConnectionError as e_conn:
+            except requests.exceptions.RequestException as e:
                 if self.sse_client_running:
-                    print(f"SSE client: Connection failed: {e_conn}. Retrying in 5 seconds...")
-            except requests.exceptions.Timeout as e_timeout:
-                if self.sse_client_running:
-                    print(f"SSE client: Connection timed out: {e_timeout}. Retrying in 5 seconds...")
-            except requests.exceptions.RequestException as e_req:
-                if self.sse_client_running: 
-                    print(f"SSE client: Request error: {e_req}. Retrying in 5 seconds...")
-            except Exception as e_generic: 
+                    print(f"SSE client: Connection error: {e}. Retrying in 5 seconds...")
+            except Exception as e_generic:
                 if self.sse_client_running:
                     print(f"SSE client: Unexpected error in listener: {e_generic}. Retrying in 10 seconds...")
             
-            if self.sse_client_running: 
-                time.sleep(5) 
+            if self.sse_client_running:
+                time.sleep(5)
             else:
-                break 
+                break
 
         print("SSE listener thread finished.")
 
