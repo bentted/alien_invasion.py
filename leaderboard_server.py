@@ -1,9 +1,10 @@
 from flask import Flask, request, jsonify, Response
 from flask_sqlalchemy import SQLAlchemy
+from werkzeug.security import generate_password_hash, check_password_hash
 import os
 import time
 import json
-from stem.control import Controller  # Add Stem for Tor control
+from stem.control import Controller
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 DATABASE_PATH = os.path.join(script_dir, 'leaderboard.db')
@@ -14,16 +15,67 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
 sse_message_queue = []
-chat_message_queue = []  # Queue to store chat messages
+chat_message_queue = []
+
+SOCIAL_SCORE_FILE = os.path.join(script_dir, 'social_scores.json')
+NEG_REPORTS_FILE = os.path.join(script_dir, 'neg_reports.json')
+POS_REPORTS_FILE = os.path.join(script_dir, 'pos_reports.json')
+
+social_scores = {}
+
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), nullable=False, unique=True)
+    password_hash = db.Column(db.String(128), nullable=False)
+
+    def __repr__(self):
+        return f'<User {self.username}>'
 
 class Score(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), nullable=False, unique=True) 
+    username = db.Column(db.String(80), nullable=False, unique=True)
     score = db.Column(db.Integer, nullable=False)
-    banned = db.Column(db.Boolean, default=False, nullable=False) 
+    banned = db.Column(db.Boolean, default=False, nullable=False)
+    bonus_lives = db.Column(db.Integer, default=0, nullable=False)
 
     def __repr__(self):
         return f'<Score {self.username}: {self.score} (Banned: {self.banned})>'
+
+@app.route('/api/register', methods=['POST'])
+def register_user():
+    data = request.get_json()
+    if not data or 'username' not in data or 'password' not in data:
+        return jsonify({'error': 'Invalid data. Username and password are required.'}), 400
+
+    username = data['username']
+    password = data['password']
+
+    if User.query.filter_by(username=username).first():
+        return jsonify({'error': 'Username already exists.'}), 400
+
+    password_hash = generate_password_hash(password)
+    new_user = User(username=username, password_hash=password_hash)
+    db.session.add(new_user)
+    db.session.commit()
+
+    social_scores[username] = 100
+
+    return jsonify({'success': True, 'message': 'User registered successfully.'}), 201
+
+@app.route('/api/login', methods=['POST'])
+def login_user():
+    data = request.get_json()
+    if not data or 'username' not in data or 'password' not in data:
+        return jsonify({'error': 'Invalid data. Username and password are required.'}), 400
+
+    username = data['username']
+    password = data['password']
+
+    user = User.query.filter_by(username=username).first()
+    if not user or not check_password_hash(user.password_hash, password):
+        return jsonify({'error': 'Invalid username or password.'}), 401
+
+    return jsonify({'success': True, 'message': 'Login successful.'}), 200
 
 @app.route('/api/scores', methods=['POST'])
 def add_score():
@@ -33,13 +85,13 @@ def add_score():
 
     username = data['username']
     score_value = data['score']
-    message_to_send = None 
+    message_to_send = None
 
     existing_score = Score.query.filter_by(username=username).first()
 
     if existing_score:
         if existing_score.banned:
-            return jsonify({'error': 'User is banned. Cannot update score.'}), 403 
+            return jsonify({'error': 'User is banned. Cannot update score.'}), 403
         if score_value > existing_score.score:
             existing_score.score = score_value
             db.session.commit()
@@ -56,12 +108,12 @@ def add_score():
         message_to_send = json.dumps({"type": "leaderboard_update", "message": f"New score added for {username}: {score_value}"})
         response_message = {'message': 'Score added successfully'}
         status_code = 201
-    
+
     if message_to_send:
         sse_message_queue.append(message_to_send)
-        if len(sse_message_queue) > 20: 
+        if len(sse_message_queue) > 20:
             sse_message_queue.pop(0)
-            
+
     return jsonify(response_message), status_code
 
 @app.route('/api/leaderboard', methods=['GET'])
@@ -133,7 +185,6 @@ def admin_unban_user(username):
 
 @app.route('/api/chat', methods=['POST'])
 def send_chat_message():
-    """Receive a chat message from a client and broadcast it."""
     data = request.get_json()
     if not data or 'username' not in data or 'message' not in data:
         return jsonify({'error': 'Invalid data. Username and message are required.'}), 400
@@ -143,21 +194,19 @@ def send_chat_message():
     chat_message = json.dumps({"type": "chat_message", "username": username, "message": message})
     
     chat_message_queue.append(chat_message)
-    if len(chat_message_queue) > 50:  # Limit the chat queue to the last 50 messages
+    if len(chat_message_queue) > 50:
         chat_message_queue.pop(0)
 
-    sse_message_queue.append(chat_message)  # Add the chat message to the SSE queue for broadcasting
+    sse_message_queue.append(chat_message)
     return jsonify({'message': 'Chat message sent successfully'}), 200
 
 @app.route('/api/chat', methods=['GET'])
 def get_chat_messages():
-    """Retrieve the last 50 chat messages."""
     messages = [json.loads(msg) for msg in chat_message_queue]
     return jsonify(messages), 200
 
 @app.route('/stream') 
 def stream():
-    """Stream SSE messages, including chat and leaderboard updates."""
     def event_stream():
         yield 'data: {{"type": "connection_ack", "message": "SSE connection established"}}\n\n'
         client_last_sent_index = len(sse_message_queue) 
@@ -169,23 +218,22 @@ def stream():
                         yield f'data: {sse_message_queue[i]}\n\n'
                     client_last_sent_index = len(sse_message_queue)
                 
-                time.sleep(1)  
+                time.sleep(1)
         except GeneratorExit:
             print(f"Client disconnected from SSE stream.")
     
     response = Response(event_stream(), mimetype="text/event-stream")
     response.headers['Cache-Control'] = 'no-cache'
     response.headers['Connection'] = 'keep-alive'
-    response.headers['X-Accel-Buffering'] = 'no' 
+    response.headers['X-Accel-Buffering'] = 'no'
     return response
 
 def setup_tor_hidden_service():
-    """Configure and start a Tor hidden service."""
     try:
         with Controller.from_port(port=9051) as controller:
-            controller.authenticate(password="your_tor_control_password")  # Replace with your Tor control password
+            controller.authenticate(password="your_tor_control_password")
             response = controller.create_hidden_service(
-                ports={80: 5000},  # Map hidden service port 80 to local port 5000
+                ports={80: 5000},
                 key_type="NEW",
                 key_content="ED25519-V3"
             )
@@ -196,9 +244,125 @@ def setup_tor_hidden_service():
         print(f"Error setting up Tor hidden service: {e}")
         return None
 
+@app.route('/api/chat/report', methods=['POST'])
+def report_user():
+    data = request.get_json()
+    if not data or 'username' not in data or 'type' not in data:
+        return jsonify({'error': 'Invalid data. Username and type are required.'}), 400
+
+    username = data['username']
+    report_type = data['type']
+    reporter = data.get('reporter', 'Anonymous')
+    reason = data.get('reason', '')
+
+    if username not in social_scores:
+        social_scores[username] = 100
+
+    if report_type == 'positive':
+        social_scores[username] += 50
+        report_entry = {
+            'username': username,
+            'reporter': reporter,
+            'reason': reason,
+            'timestamp': time.time()
+        }
+        with open(POS_REPORTS_FILE, 'a') as f:
+            json.dump(report_entry, f)
+            f.write('\n')
+        response_message = {'message': f'Positive feedback recorded for {username}'}
+
+        if social_scores[username] >= 500:
+            user_score = Score.query.filter_by(username=username).first()
+            if user_score:
+                user_score.bonus_lives = 1
+                db.session.commit()
+
+    elif report_type == 'negative':
+        social_scores[username] -= 25
+        report_entry = {
+            'username': username,
+            'reporter': reporter,
+            'reason': reason,
+            'timestamp': time.time()
+        }
+        with open(NEG_REPORTS_FILE, 'a') as f:
+            json.dump(report_entry, f)
+            f.write('\n')
+        response_message = {'message': f'Negative feedback recorded for {username}'}
+
+        user_score = Score.query.filter_by(username=username).first()
+        if user_score:
+            user_score.bonus_lives = 0
+            db.session.commit()
+
+    else:
+        return jsonify({'error': 'Invalid report type. Must be "positive" or "negative".'}), 400
+
+    with open(SOCIAL_SCORE_FILE, 'w') as f:
+        json.dump(social_scores, f)
+
+    return jsonify(response_message), 200
+
+@app.route('/api/social_scores', methods=['GET'])
+def get_social_scores():
+    return jsonify(social_scores), 200
+
+@app.route('/api/admin/social_scores', methods=['GET'])
+def admin_get_social_scores():
+    return jsonify(social_scores), 200
+
+@app.route('/api/penalty', methods=['GET'])
+def get_user_penalty():
+    username = request.args.get('username')
+    if not username:
+        return jsonify({'error': 'Username is required.'}), 400
+
+    if username not in social_scores:
+        return jsonify({'penalty': 0}), 200
+
+    negative_reports = 0
+    try:
+        with open(NEG_REPORTS_FILE, 'r') as f:
+            for line in f:
+                report = json.loads(line)
+                if report['username'] == username:
+                    negative_reports += 1
+    except FileNotFoundError:
+        pass
+
+    penalty = negative_reports * 10
+    return jsonify({'penalty': penalty}), 200
+
+@app.route('/api/bonus', methods=['GET'])
+def get_user_bonus():
+    username = request.args.get('username')
+    if not username:
+        return jsonify({'error': 'Username is required.'}), 400
+
+    if username not in social_scores:
+        return jsonify({'bonus': 0}), 200
+
+    positive_reports = 0
+    try:
+        with open(POS_REPORTS_FILE, 'r') as f:
+            for line in f:
+                report = json.loads(line)
+                if report['username'] == username:
+                    positive_reports += 1
+    except FileNotFoundError:
+        pass
+
+    bonus = positive_reports * 10
+    return jsonify({'bonus': bonus}), 200
+
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
+
+    for report_file in [NEG_REPORTS_FILE, POS_REPORTS_FILE]:
+        if not os.path.exists(report_file):
+            with open(report_file, 'w') as f:
+                pass
 
     onion_address = setup_tor_hidden_service()
     if onion_address:
