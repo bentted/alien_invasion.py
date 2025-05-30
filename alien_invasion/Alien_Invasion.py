@@ -6,6 +6,7 @@ from stem.control import Controller  # Add Stem for Tor control
 import pygame
 import os
 import threading
+import random  # Add import for random module
 
 from settings import Settings
 from game_stats import GameStats
@@ -95,6 +96,35 @@ class AlienInvasion:
         self._load_global_leaderboard()
         self._start_sse_listener()
 
+        self.penalty_per_alien = 0  # Penalty points per alien killed
+        self.bonus_per_alien = 0  # Bonus points per alien killed
+
+        # Login and registration attributes
+        self.login_screen_active = True
+        self.registration_screen_active = False
+        self.login_username = ""
+        self.login_password = ""
+        self.registration_username = ""
+        self.registration_password = ""
+        self.registration_confirm_password = ""
+
+        self.dropdown_active = False
+        self.dropdown_rect = None
+        self.selected_username = None
+        self.user_profile_data = None  # Store user profile data
+
+        # Report attributes
+        self.report_window_active = False
+        self.report_topics = ["Hate Speech", "Harassment", "CP", "Gore", "Rude", "Hateful"]
+        self.selected_report_topic = None
+        self.report_details_input = ""  # Store user input for report details
+        self.report_details_active = False  # Track if the input box is active
+
+        self.upgrade_active = None  # Track the active upgrade
+        self.upgrade_timer = 0  # Timer for upgrade duration
+
+        self.social_score = 0  # Track the player's social score
+
     def _initialize_settings_sliders(self):
         """Create sliders for the settings page."""
         self.settings_sliders = []
@@ -181,6 +211,10 @@ class AlienInvasion:
                     self._check_keydown_events(event)
                 elif event.type == pygame.KEYUP:
                     self._check_keyup_events(event)
+            elif self.login_screen_active:
+                self._handle_login_input(event)
+            elif self.registration_screen_active:
+                self._handle_registration_input(event)
             else:
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     mouse_pos = pygame.mouse.get_pos()
@@ -213,6 +247,32 @@ class AlienInvasion:
             self.settings_page_active = False
             self.title_screen_active = True
 
+    def _load_user_penalty(self):
+        """Load the penalty score for the current user."""
+        if not self.username:
+            return
+        try:
+            response = requests.get(f"{self.server_url}/api/penalty", params={"username": self.username}, timeout=5)
+            response.raise_for_status()
+            self.penalty_per_alien = response.json().get('penalty', 0)
+            print(f"Penalty for {self.username}: {self.penalty_per_alien} points per alien.")
+        except requests.exceptions.RequestException as e:
+            print(f"Error loading penalty for {self.username}: {e}")
+            self.penalty_per_alien = 0
+
+    def _load_user_bonus(self):
+        """Load the bonus score for the current user."""
+        if not self.username:
+            return
+        try:
+            response = requests.get(f"{self.server_url}/api/bonus", params={"username": self.username}, timeout=5)
+            response.raise_for_status()
+            self.bonus_per_alien = response.json().get('bonus', 0)
+            print(f"Bonus for {self.username}: {self.bonus_per_alien} points per alien.")
+        except requests.exceptions.RequestException as e:
+            print(f"Error loading bonus for {self.username}: {e}")
+            self.bonus_per_alien = 0
+
     def _handle_username_input(self, event):
         """Handle keypresses during username input."""
         if event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER:
@@ -225,6 +285,8 @@ class AlienInvasion:
                 self.title_screen_active = False
                 self.settings_page_active = False
                 self.game_active = False
+                self._load_user_penalty()  # Load penalty after username is set
+                self._load_user_bonus()  # Load bonus after username is set
         elif event.key == pygame.K_BACKSPACE:
             self.user_input = self.user_input[:-1]
         elif len(self.user_input) < 20:
@@ -293,11 +355,15 @@ class AlienInvasion:
     def _check_bullet_alien_collisions(self):
         """Respond to bullet-alien collisions."""
         collisions = pygame.sprite.groupcollide(
-                self.bullets, self.aliens, True, True)
+            self.bullets, self.aliens, True, True)
 
         if collisions:
             for aliens in collisions.values():
-                self.stats.score += self.settings.alien_points * len(aliens)
+                base_points = self.settings.alien_points * len(aliens)
+                penalty_points = self.penalty_per_alien * len(aliens)
+                bonus_points = self.bonus_per_alien * len(aliens)
+                self.stats.score += base_points - penalty_points + bonus_points
+                self._check_for_upgrade()  # Check for random upgrade
             self.sb.prep_score()
             self.sb.check_high_score()
 
@@ -313,144 +379,79 @@ class AlienInvasion:
                 level_code = self._generate_level_code(self.stats.level)
                 print(f"Level {self.stats.level} completed! Your level code is: {level_code}")
 
-    def _update_aliens(self):
-        """Check if the fleet is at an edge, then update the positions of all aliens in the fleet."""
-        self._check_fleet_edges()
-        self.aliens.update()
+    def _check_for_upgrade(self):
+        """Randomly grant an upgrade when an alien is killed."""
+        drop_rate = 0.1  # Default drop rate: 10%
+        if self.social_score >= 1000:
+            drop_rate = 0.5  # Increase drop rate to 50% if social score is 1000 or more
 
-        if pygame.sprite.spritecollideany(self.ship, self.aliens):
-            self._ship_hit()
+        if random.random() < drop_rate:
+            upgrade_type = random.choice(["double_speed", "double_fire_rate", "double_score", "+1_life"])
+            print(f"Upgrade granted: {upgrade_type}")
+            self._apply_upgrade(upgrade_type)
 
-        self._check_aliens_bottom()
+    def _apply_upgrade(self, upgrade_type):
+        """Apply the given upgrade."""
+        self.upgrade_active = upgrade_type
+        duration = 10000  # Default duration: 10 seconds
+        if self.social_score >= 300:
+            duration = 60000  # Increase duration to 60 seconds if social score is 300 or more
 
-    def _ship_hit(self):
-        """Respond to the ship being hit by an alien."""
-        if self.stats.ships_left > 0:
-            self.stats.ships_left -= 1
+        self.upgrade_timer = pygame.time.get_ticks() + duration  # Set the timer with the calculated duration
+
+        if upgrade_type == "double_speed":
+            self.settings.ship_speed *= 2
+        elif upgrade_type == "double_fire_rate":
+            self.settings.bullet_speed *= 2
+        elif upgrade_type == "double_score":
+            self.settings.score_scale *= 2
+        elif upgrade_type == "+1_life":
+            self.stats.ships_left += 1
             self.sb.prep_ships()
 
-            self.bullets.empty()
-            self.aliens.empty()
+    def _update_upgrades(self):
+        """Update and deactivate upgrades after their duration expires."""
+        if self.upgrade_active and pygame.time.get_ticks() > self.upgrade_timer:
+            print(f"Upgrade expired: {self.upgrade_active}")
+            if self.upgrade_active == "double_speed":
+                self.settings.ship_speed /= 2
+            elif self.upgrade_active == "double_fire_rate":
+                self.settings.bullet_speed /= 2
+            elif self.upgrade_active == "double_score":
+                self.settings.score_scale /= 2
+            self.upgrade_active = None
 
-            self._create_fleet()
-            self.ship.center_ship()
+    def _update_screen(self):
+        """Update images on the screen, and flip to the new screen."""
+        self.screen.fill(self.settings.bg_color)
 
-            sleep(0.5)
+        if self.title_screen_active:
+            self._draw_title_screen()
+        elif self.settings_page_active:
+            self._draw_settings_page()
+        elif self.username_input_active:
+            self._draw_username_input()
+        elif self.login_screen_active:
+            self._draw_login_screen()
+        elif self.registration_screen_active:
+            self._draw_registration_screen()
+        elif self.report_window_active:
+            self._draw_report_window()
         else:
-            self.game_active = False
-            pygame.mouse.set_visible(True)
-            if self.username:
-                current_high_score = self.high_scores.get(self.username, 0)
-                if self.stats.score > current_high_score:
-                    self.high_scores[self.username] = self.stats.score
-                if self.stats.score > self.stats.high_score:
-                    self.stats.high_score = self.stats.score
-                    self.sb.prep_high_score()
+            self.screen.fill(self.settings.bg_color)
 
-                self._submit_score_to_global_leaderboard(self.username, self.stats.score)
+        # Draw the ship, bullets, and aliens
+        self.ship.blitme()
+        for bullet in self.bullets.sprites():
+            bullet.draw_bullet()
+        self.aliens.draw(self.screen)
 
-            self.user_input = ""
-            self.title_screen_active = True
-            self.username_input_active = False
-            self._load_global_leaderboard()
+        # Draw the scoreboard
+        self.sb.show_score()
 
-    def _create_fleet(self):
-        """Create the fleet of aliens."""
-        alien = Alien(self)
-        alien_width, alien_height = alien.rect.size
+        pygame.display.flip()
 
-        current_x, current_y = alien_width, alien_height
-        while current_y < (self.settings.screen_height - 3 * alien_height):
-            while current_x < (self.settings.screen_width - 2 * alien_width):
-                self._create_alien(current_x, current_y)
-                current_x += 2 * alien_width
-
-            current_x = alien_width
-            current_y += 2 * alien_height
-
-    def _create_alien(self, x_position, y_position):
-        """Create an alien and place it in the fleet."""
-        new_alien = Alien(self)
-        new_alien.x = x_position
-        new_alien.rect.x = x_position
-        new_alien.rect.y = y_position
-        self.aliens.add(new_alien)
-
-    def _check_fleet_edges(self):
-        """Respond appropriately if any aliens have reached an edge."""
-        for alien in self.aliens.sprites():
-            if alien.check_edges():
-                self._change_fleet_direction()
-                break
-
-    def _change_fleet_direction(self):
-        """Drop the entire fleet and change the fleet's direction."""
-        for alien in self.aliens.sprites():
-            alien.rect.y += self.settings.fleet_drop_speed
-        self.settings.fleet_direction *= -1
-
-    def _check_aliens_bottom(self):
-        """Check if any aliens have reached the bottom of the screen."""
-        screen_rect = self.screen.get_rect()
-        for alien in self.aliens.sprites():
-            if alien.rect.bottom >= screen_rect.bottom:
-                self._ship_hit()
-                break
-
-    def _save_high_scores(self):
-        """Save high scores to a file."""
-        filename = 'high_scores.json'
-        with open(filename, 'w') as f:
-            json.dump(self.high_scores, f)
-
-    def _load_high_scores(self):
-        """Load high scores from a file."""
-        filename = 'high_scores.json'
-        try:
-            with open(filename) as f:
-                self.high_scores = json.load(f)
-                if self.high_scores:
-                    pass
-        except FileNotFoundError:
-            pass
-        except json.JSONDecodeError:
-            self.high_scores = {}
-
-    def _load_global_leaderboard(self):
-        """Load global leaderboard data from the server."""
-        try:
-            response = requests.get(f"{self.server_url}/api/leaderboard", timeout=5)
-            response.raise_for_status()  
-            self.global_leaderboard_data = response.json()
-        except requests.exceptions.RequestException as e:
-            print(f"Error loading global leaderboard: {e}")
-            self.global_leaderboard_data = [] 
-        except json.JSONDecodeError:
-            print("Error: Could not decode JSON from leaderboard server.")
-            self.global_leaderboard_data = []
-
-        self._prepare_leaderboard_images()
-
-    def _prepare_leaderboard_images(self):
-        """Create rendered text images for the global leaderboard."""
-        self.global_leaderboard_images = []
-        display_data = self.global_leaderboard_data[:self.max_leaderboard_entries]
-        for i, entry in enumerate(display_data):
-            username = entry.get('username', 'Unknown')
-            score = entry.get('score', 0)
-            text = f"{i + 1}. {username}: {score:,}"
-            image = self.leaderboard_font.render(text, True, self.settings.text_color, self.settings.bg_color)
-            self.global_leaderboard_images.append(image)
-
-    def _submit_score_to_global_leaderboard(self, username, score):
-        """Submit score to the global leaderboard server."""
-        try:
-            payload = {"username": username, "score": score}
-            response = requests.post(f"{self.server_url}/api/scores", json=payload, timeout=5)
-            response.raise_for_status()
-            print(f"Score submission response: {response.json().get('message')}")
-        except requests.exceptions.RequestException as e:
-            print(f"Error submitting score to global leaderboard: {e}")
+        self._update_upgrades()  # Update upgrades
 
     def _draw_title_screen(self):
         """Draw the title screen elements."""
@@ -561,194 +562,949 @@ class AlienInvasion:
         
         pygame.mouse.set_visible(True)
 
-    def _start_sse_listener(self):
-        """Starts the SSE client in a separate thread."""
-        if not self.sse_client_running and (self.sse_thread is None or not self.sse_thread.is_alive()): 
-            self.sse_client_running = True
-            self.leaderboard_update_pending = False 
-            self.sse_thread = threading.Thread(target=self._listen_for_leaderboard_updates, daemon=True)
-            self.sse_thread.start()
-            print("SSE listener thread started.")
-        elif self.sse_thread and not self.sse_thread.is_alive():
-            print("SSE thread was not alive. Attempting to restart.")
-            self.sse_client_running = True 
-            self.leaderboard_update_pending = False
-            self.sse_thread = threading.Thread(target=self._listen_for_leaderboard_updates, daemon=True)
-            self.sse_thread.start()
+    def _draw_login_screen(self):
+        """Draw the login screen."""
+        self.screen.fill(self.settings.bg_color)
+        font = pygame.font.SysFont(None, 36)
 
-    def _listen_for_leaderboard_updates(self):
-        """Listens for SSE messages from the server."""
-        stream_url = f"{self.server_url}/stream"
-        print(f"SSE client: Connecting to {stream_url}...")
-        
-        while self.sse_client_running:
-            try:
-                with requests.get(stream_url, stream=True, timeout=(5.0, 15.0)) as response: 
-                    response.raise_for_status() 
-                    print(f"SSE client: Connected to {stream_url}. Waiting for messages...")
-                    for line in response.iter_lines(): 
-                        if not self.sse_client_running: 
-                            print("SSE client: sse_client_running is false, breaking inner loop.")
-                            break
-                        if line:
-                            decoded_line = line.decode('utf-8')
-                            if decoded_line.startswith('data:'):
-                                try:
-                                    message_data = decoded_line[len('data:'):].strip()
-                                    if not message_data: 
-                                        continue
-                                    message = json.loads(message_data)
-                                    print(f"SSE client: Message received: {message}")
-                                    if message.get("type") == "leaderboard_update":
-                                        print("SSE client: Leaderboard update message received. Setting pending flag.")
-                                        self.leaderboard_update_pending = True
-                                    elif message.get("type") == "connection_ack":
-                                        print(f"SSE client: Connection Acknowledged: {message.get('message')}")
-                                except json.JSONDecodeError:
-                                    print(f"SSE client: Could not decode JSON: '{message_data}' from line '{decoded_line}'")
-                                except Exception as e_json:
-                                    print(f"SSE client: Error processing message data '{message_data}': {e_json}")
-                    
-                    if not self.sse_client_running:
-                        print("SSE client: sse_client_running is false, exiting after iter_lines.")
-                        break 
-                    else:
-                        print("SSE client: Stream ended. Will attempt to reconnect if client is still running.")
+        # Username input
+        username_label = font.render("Username:", True, self.settings.text_color)
+        username_label_rect = username_label.get_rect()
+        username_label_rect.topleft = (100, 150)
+        self.screen.blit(username_label, username_label_rect)
 
-            except requests.exceptions.ConnectionError as e_conn:
-                if self.sse_client_running:
-                    print(f"SSE client: Connection failed: {e_conn}. Retrying in 5 seconds...")
-            except requests.exceptions.Timeout as e_timeout:
-                if self.sse_client_running:
-                    print(f"SSE client: Connection timed out: {e_timeout}. Retrying in 5 seconds...")
-            except requests.exceptions.RequestException as e_req:
-                if self.sse_client_running: 
-                    print(f"SSE client: Request error: {e_req}. Retrying in 5 seconds...")
-            except Exception as e_generic: 
-                if self.sse_client_running:
-                    print(f"SSE client: Unexpected error in listener: {e_generic}. Retrying in 10 seconds...")
-            
-            if self.sse_client_running: 
-                time.sleep(5) 
+        username_input_rect = pygame.Rect(250, 150, 200, 30)
+        pygame.draw.rect(self.screen, (255, 255, 255), username_input_rect)
+        pygame.draw.rect(self.screen, (0, 0, 0), username_input_rect, 2)
+        username_text = font.render(self.login_username, True, (0, 0, 0))
+        self.screen.blit(username_text, (username_input_rect.x + 5, username_input_rect.y + 5))
+
+        # Password input
+        password_label = font.render("Password:", True, self.settings.text_color)
+        password_label_rect = password_label.get_rect()
+        password_label_rect.topleft = (100, 200)
+        self.screen.blit(password_label, password_label_rect)
+
+        password_input_rect = pygame.Rect(250, 200, 200, 30)
+        pygame.draw.rect(self.screen, (255, 255, 255), password_input_rect)
+        pygame.draw.rect(self.screen, (0, 0, 0), password_input_rect, 2)
+        password_text = font.render("*" * len(self.login_password), True, (0, 0, 0))
+        self.screen.blit(password_text, (password_input_rect.x + 5, password_input_rect.y + 5))
+
+        # Buttons
+        login_button = Button(self, "Login")
+        login_button.rect.topleft = (250, 250)
+        login_button.draw_button()
+
+        register_button = Button(self, "Register")
+        register_button.rect.topleft = (250, 300)
+        register_button.draw_button()
+
+        pygame.mouse.set_visible(True)
+
+    def _handle_login_input(self, event):
+        """Handle input on the login screen."""
+        if event.key == pygame.K_TAB:
+            # Switch between username and password fields
+            pass
+        elif event.key == pygame.K_RETURN:
+            self._attempt_login()
+        elif event.key == pygame.K_BACKSPACE:
+            if self.login_password:
+                self.login_password = self.login_password[:-1]
+            elif self.login_username:
+                self.login_username = self.login_username[:-1]
+        else:
+            if len(self.login_username) < 20:
+                self.login_username += event.unicode
+            elif len(self.login_password) < 20:
+                self.login_password += event.unicode
+
+    def _attempt_login(self):
+        """Attempt to log in the user."""
+        try:
+            payload = {"username": self.login_username, "password": self.login_password}
+            response = requests.post(f"{self.server_url}/api/login", json=payload, timeout=5)
+            response.raise_for_status()
+            data = response.json()
+            if data.get("success"):
+                print("Login successful!")
+                self.username = self.login_username  # Set the username for display
+                self.login_screen_active = False
+                self.title_screen_active = True
             else:
-                break 
+                print("Login failed:", data.get("message"))
+        except requests.exceptions.RequestException as e:
+            print(f"Error during login: {e}")
 
-        print("SSE listener thread finished.")
+    def _draw_registration_screen(self):
+        """Draw the registration screen."""
+        self.screen.fill(self.settings.bg_color)
+        font = pygame.font.SysFont(None, 36)
 
-    def _listen_for_chat_updates(self):
-        """Listen for chat messages from the server."""
-        stream_url = f"{self.server_url}/stream"
-        print(f"Chat client: Connecting to {stream_url} for chat updates...")
-        while True:
-            try:
-                with requests.get(stream_url, stream=True, timeout=(5.0, 15.0)) as response:
-                    response.raise_for_status()
-                    for line in response.iter_lines():
-                        if line:
-                            decoded_line = line.decode('utf-8')
-                            if decoded_line.startswith('data:'):
-                                try:
-                                    message_data = decoded_line[len('data:'):].strip()
-                                    if not message_data:
-                                        continue
-                                    message = json.loads(message_data)
-                                    if message.get("type") == "chat_message":
-                                        self.chat_messages.append(f"{message['username']}: {message['message']}")
-                                        if len(self.chat_messages) > 50:  # Limit chat history
-                                            self.chat_messages.pop(0)
-                                        self.chat_update_pending = True
-                                except json.JSONDecodeError:
-                                    print(f"Chat client: Could not decode JSON: '{decoded_line}'")
-            except requests.exceptions.RequestException as e:
-                print(f"Chat client: Connection error: {e}. Retrying in 5 seconds...")
-                time.sleep(5)
+        # Username input
+        username_label = font.render("Username:", True, self.settings.text_color)
+        username_label_rect = username_label.get_rect()
+        username_label_rect.topleft = (100, 150)
+        self.screen.blit(username_label, username_label_rect)
 
-    def _send_chat_message(self, message):
-        """Send a chat message to the server."""
+        username_input_rect = pygame.Rect(250, 150, 200, 30)
+        pygame.draw.rect(self.screen, (255, 255, 255), username_input_rect)
+        pygame.draw.rect(self.screen, (0, 0, 0), username_input_rect, 2)
+        username_text = font.render(self.registration_username, True, (0, 0, 0))
+        self.screen.blit(username_text, (username_input_rect.x + 5, username_input_rect.y + 5))
+
+        # Password input
+        password_label = font.render("Password:", True, self.settings.text_color)
+        password_label_rect = password_label.get_rect()
+        password_label_rect.topleft = (100, 200)
+        self.screen.blit(password_label, password_label_rect)
+
+        password_input_rect = pygame.Rect(250, 200, 200, 30)
+        pygame.draw.rect(self.screen, (255, 255, 255), password_input_rect)
+        pygame.draw.rect(self.screen, (0, 0, 0), password_input_rect, 2)
+        password_text = font.render("*" * len(self.registration_password), True, (0, 0, 0))
+        self.screen.blit(password_text, (password_input_rect.x + 5, password_input_rect.y + 5))
+
+        # Confirm password input
+        confirm_password_label = font.render("Confirm Password:", True, self.settings.text_color)
+        confirm_password_label_rect = confirm_password_label.get_rect()
+        confirm_password_label_rect.topleft = (100, 250)
+        self.screen.blit(confirm_password_label, confirm_password_label_rect)
+
+        confirm_password_input_rect = pygame.Rect(250, 250, 200, 30)
+        pygame.draw.rect(self.screen, (255, 255, 255), confirm_password_input_rect)
+        pygame.draw.rect(self.screen, (0, 0, 0), confirm_password_input_rect, 2)
+        confirm_password_text = font.render("*" * len(self.registration_confirm_password), True, (0, 0, 0))
+        self.screen.blit(confirm_password_text, (confirm_password_input_rect.x + 5, confirm_password_input_rect.y + 5))
+
+        # Buttons
+        register_button = Button(self, "Register")
+        register_button.rect.topleft = (250, 300)
+        register_button.draw_button()
+
+        back_button = Button(self, "Back")
+        back_button.rect.topleft = (250, 350)
+        back_button.draw_button()
+
+        pygame.mouse.set_visible(True)
+
+    def _handle_registration_input(self, event):
+        """Handle input on the registration screen."""
+        if event.key == pygame.K_TAB:
+            # Switch between fields (not implemented)
+            pass
+        elif event.key == pygame.K_RETURN:
+            self._attempt_registration()
+        elif event.key == pygame.K_BACKSPACE:
+            if self.registration_confirm_password:
+                self.registration_confirm_password = self.registration_confirm_password[:-1]
+            elif self.registration_password:
+                self.registration_password = self.registration_password[:-1]
+            elif self.registration_username:
+                self.registration_username = self.registration_username[:-1]
+        else:
+            if len(self.registration_username) < 20:
+                self.registration_username += event.unicode
+            elif len(self.registration_password) < 20:
+                self.registration_password += event.unicode
+            elif len(self.registration_confirm_password) < 20:
+                self.registration_confirm_password += event.unicode
+
+    def _attempt_registration(self):
+        """Attempt to register a new user."""
+        if self.registration_password != self.registration_confirm_password:
+            print("Passwords do not match!")
+            return
+
+        try:
+            payload = {"username": self.registration_username, "password": self.registration_password}
+            response = requests.post(f"{self.server_url}/api/register", json=payload, timeout=5)
+            response.raise_for_status()
+            data = response.json()
+            if data.get("success"):
+                print("Registration successful! You can now log in.")
+                self.registration_screen_active = False
+                self.login_screen_active = True
+            else:
+                print("Registration failed:", data.get("message"))
+        except requests.exceptions.RequestException as e:
+            print(f"Error during registration: {e}")
+
+    def _draw_report_window(self):
+        """Draw the report window."""
+        if self.report_window_active:
+            self.screen.fill(self.settings.bg_color)
+            font = pygame.font.SysFont(None, 36)
+
+            # Title
+            title_text = f"Report User: {self.selected_username}"
+            title_image = font.render(title_text, True, self.settings.text_color)
+            title_rect = title_image.get_rect()
+            title_rect.centerx = self.screen_rect.centerx
+            title_rect.top = 50
+            self.screen.blit(title_image, title_rect)
+
+            # Topics
+            topic_font = pygame.font.SysFont(None, 30)
+            y_offset = 150
+            self.report_topic_rects = []
+            for topic in self.report_topics:
+                topic_image = topic_font.render(topic, True, self.settings.text_color)
+                topic_rect = topic_image.get_rect()
+                topic_rect.centerx = self.screen_rect.centerx
+                topic_rect.top = y_offset
+                self.report_topic_rects.append((topic, topic_rect))
+                self.screen.blit(topic_image, topic_rect)
+                y_offset += 40
+
+            # Input box for additional details
+            if self.selected_report_topic:
+                details_label = font.render("Details (optional):", True, self.settings.text_color)
+                details_label_rect = details_label.get_rect()
+                details_label_rect.topleft = (50, y_offset + 20)
+                self.screen.blit(details_label, details_label_rect)
+
+                input_box_rect = pygame.Rect(50, y_offset + 60, 500, 30)
+                pygame.draw.rect(self.screen, (255, 255, 255), input_box_rect)
+                pygame.draw.rect(self.screen, (0, 0, 0), input_box_rect, 2)
+
+                input_text_image = font.render(self.report_details_input, True, (0, 0, 0))
+                self.screen.blit(input_text_image, (input_box_rect.left + 5, input_box_rect.top + 5))
+
+                # Submit Button
+                submit_button = Button(self, "Submit")
+                submit_button.rect.centerx = self.screen_rect.centerx
+                submit_button.rect.top = y_offset + 120
+                submit_button.draw_button()
+
+            # Back Button
+            back_button = Button(self, "Back")
+            back_button.rect.centerx = self.screen_rect.centerx
+            back_button.rect.top = y_offset + 180
+            back_button.draw_button()
+
+    def _handle_report_window_click(self, mouse_pos):
+        """Handle clicks in the report window."""
+        for topic, rect in self.report_topic_rects:
+            if rect.collidepoint(mouse_pos):
+                self.selected_report_topic = topic
+                self.report_details_active = True  # Activate the input box
+                return
+
+        # Check if submit button is clicked
+        if self.selected_report_topic:
+            submit_button_rect = pygame.Rect(
+                self.screen_rect.centerx - 50, self.report_topic_rects[-1][1].bottom + 120, 100, 30
+            )
+            if submit_button_rect.collidepoint(mouse_pos):
+                self._submit_report()
+                self.report_window_active = False
+                return
+
+        # Check if back button is clicked
+        back_button_rect = pygame.Rect(
+            self.screen_rect.centerx - 50, self.report_topic_rects[-1][1].bottom + 180, 100, 30
+        )
+        if back_button_rect.collidepoint(mouse_pos):
+            self.report_window_active = False
+
+    def _handle_report_window_input(self, event):
+        """Handle text input for the report details."""
+        if self.report_details_active:
+            if event.key == pygame.K_RETURN:
+                self.report_details_active = False  # Deactivate input box on Enter
+            elif event.key == pygame.K_BACKSPACE:
+                self.report_details_input = self.report_details_input[:-1]
+            elif len(self.report_details_input) < 200:  # Limit input length
+                self.report_details_input += event.unicode
+
+    def _submit_report(self):
+        """Submit the report for the selected user."""
+        try:
+            payload = {
+                "username": self.selected_username,
+                "type": "negative",
+                "reporter": self.username,
+                "reason": self.selected_report_topic,
+                "details": self.report_details_input,  # Include additional details
+            }
+            response = requests.post(f"{self.server_url}/api/chat/report", json=payload, timeout=5)
+            response.raise_for_status()
+            print(f"Reported user {self.selected_username}: {response.json().get('message')}")
+        except requests.exceptions.RequestException as e:
+            print(f"Error reporting user {self.selected_username}: {e}")
+
+    def _check_events(self):
+        """Respond to keypresses and mouse events."""
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                self._save_high_scores()
+                self.sse_client_running = False
+                if self.sse_thread and self.sse_thread.is_alive():
+                    try:
+                        self.sse_thread.join(timeout=1.0)
+                    except RuntimeError:
+                        pass
+                sys.exit()
+
+            if event.type == pygame.KEYDOWN:
+                if self.report_window_active:
+                    self._handle_report_window_input(event)
+                if event.key == pygame.K_ESCAPE:
+                    if self.settings_page_active:
+                        self._apply_slider_settings()
+                        self.settings_page_active = False
+                        self.title_screen_active = True
+                        continue
+                    else:
+                        self._save_high_scores()
+                        self.sse_client_running = False
+                        if self.sse_thread and self.sse_thread.is_alive():
+                            try:
+                                self.sse_thread.join(timeout=1.0)
+                            except RuntimeError:
+                                pass
+                        sys.exit()
+
+            if self.title_screen_active:
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    mouse_pos = pygame.mouse.get_pos()
+                    self._check_title_screen_buttons(mouse_pos)
+            elif self.settings_page_active:
+                for slider in self.settings_sliders:
+                    slider.handle_event(event)
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    mouse_pos = pygame.mouse.get_pos()
+                    self._check_settings_page_buttons(mouse_pos)
+            elif self.username_input_active:
+                if event.type == pygame.KEYDOWN:
+                    self._handle_username_input(event)
+            elif self.game_active:
+                if event.type == pygame.KEYDOWN:
+                    self._check_keydown_events(event)
+                elif event.type == pygame.KEYUP:
+                    self._check_keyup_events(event)
+            elif self.login_screen_active:
+                self._handle_login_input(event)
+            elif self.registration_screen_active:
+                self._handle_registration_input(event)
+            else:
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    mouse_pos = pygame.mouse.get_pos()
+                    self._check_play_button(mouse_pos)
+
+    def _check_title_screen_buttons(self, mouse_pos):
+        """Check if any title screen buttons were clicked."""
+        if self.start_button.rect.collidepoint(mouse_pos):
+            self.title_screen_active = False
+            self.username_input_active = True
+            pygame.mouse.set_visible(True)
+        elif self.settings_button.rect.collidepoint(mouse_pos):
+            self.title_screen_active = False
+            self.settings_page_active = True
+        elif self.exit_button.rect.collidepoint(mouse_pos):
+            self._save_high_scores()
+            sys.exit()
+        elif self.level_code_button.rect.collidepoint(mouse_pos):
+            self.title_screen_active = False
+            self.level_code_input_active = True
+        elif self.high_score_mode_button.rect.collidepoint(mouse_pos):
+            self.high_score_mode = True
+            self.title_screen_active = False
+            self.username_input_active = True
+
+    def _check_settings_page_buttons(self, mouse_pos):
+        """Check if any settings page buttons were clicked."""
+        if self.back_button.rect.collidepoint(mouse_pos):
+            self._apply_slider_settings()
+            self.settings_page_active = False
+            self.title_screen_active = True
+
+    def _load_user_penalty(self):
+        """Load the penalty score for the current user."""
         if not self.username:
-            print("Chat client: Cannot send message without a username.")
             return
         try:
-            payload = {"username": self.username, "message": message}
-            response = requests.post(f"{self.server_url}/api/chat", json=payload, timeout=5)
+            response = requests.get(f"{self.server_url}/api/penalty", params={"username": self.username}, timeout=5)
             response.raise_for_status()
-            print("Chat client: Message sent successfully.")
+            self.penalty_per_alien = response.json().get('penalty', 0)
+            print(f"Penalty for {self.username}: {self.penalty_per_alien} points per alien.")
         except requests.exceptions.RequestException as e:
-            print(f"Chat client: Error sending message: {e}")
+            print(f"Error loading penalty for {self.username}: {e}")
+            self.penalty_per_alien = 0
 
-    def _draw_chat_window(self):
-        """Draw the chat window on the screen."""
-        chat_window_width = 400
-        chat_window_height = 300
-        chat_window_rect = pygame.Rect(
-            self.screen_rect.right - chat_window_width - 20,
-            self.screen_rect.bottom - chat_window_height - 20,
-            chat_window_width,
-            chat_window_height
-        )
-        pygame.draw.rect(self.screen, (50, 50, 50), chat_window_rect)
-        pygame.draw.rect(self.screen, (200, 200, 200), chat_window_rect, 2)
+    def _load_user_bonus(self):
+        """Load the bonus score for the current user."""
+        if not self.username:
+            return
+        try:
+            response = requests.get(f"{self.server_url}/api/bonus", params={"username": self.username}, timeout=5)
+            response.raise_for_status()
+            self.bonus_per_alien = response.json().get('bonus', 0)
+            print(f"Bonus for {self.username}: {self.bonus_per_alien} points per alien.")
+        except requests.exceptions.RequestException as e:
+            print(f"Error loading bonus for {self.username}: {e}")
+            self.bonus_per_alien = 0
 
-        font = pygame.font.SysFont(None, 24)
-        y_offset = chat_window_rect.top + 10
-        for message in self.chat_messages[-10:]:  # Display the last 10 messages
-            message_image = font.render(message, True, (255, 255, 255))
-            self.screen.blit(message_image, (chat_window_rect.left + 10, y_offset))
-            y_offset += font.get_height() + 5
-
-        input_rect = pygame.Rect(
-            chat_window_rect.left + 10,
-            chat_window_rect.bottom - 40,
-            chat_window_width - 20,
-            30
-        )
-        pygame.draw.rect(self.screen, (255, 255, 255), input_rect)
-        pygame.draw.rect(self.screen, (0, 0, 0), input_rect, 2)
-
-        input_text_image = font.render(self.chat_user_input, True, (0, 0, 0))
-        self.screen.blit(input_text_image, (input_rect.left + 5, input_rect.top + 5))
-
-    def _handle_chat_input(self, event):
-        """Handle chat input events."""
+    def _handle_username_input(self, event):
+        """Handle keypresses during username input."""
         if event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER:
-            if self.chat_user_input:
-                self._send_chat_message(self.chat_user_input)
-                self.chat_user_input = ""
+            if self.user_input:
+                self.username = self.user_input
+                self.username_input_active = False
+                self.user_input = ""
+                self.sb.prep_score()
+                self.sb.prep_high_score()
+                self.title_screen_active = False
+                self.settings_page_active = False
+                self.game_active = False
+                self._load_user_penalty()  # Load penalty after username is set
+                self._load_user_bonus()  # Load bonus after username is set
         elif event.key == pygame.K_BACKSPACE:
-            self.chat_user_input = self.chat_user_input[:-1]
-        elif len(self.chat_user_input) < 100:
-            self.chat_user_input += event.unicode
+            self.user_input = self.user_input[:-1]
+        elif len(self.user_input) < 20:
+            self.user_input += event.unicode
+
+    def _check_play_button(self, mouse_pos):
+        """Start a new game when the player clicks Play (original button)."""
+        button_clicked = self.play_button.rect.collidepoint(mouse_pos)
+        if button_clicked and not self.game_active and \
+           not self.title_screen_active and not self.settings_page_active \
+           and not self.username_input_active and self.username:
+            self.settings.initialize_dynamic_settings()
+
+            self.stats.reset_stats()
+            self.sb.prep_score()
+            self.sb.prep_high_score()
+            self.sb.prep_level()
+            self.sb.prep_ships()
+
+            self.title_screen_active = True
+            self.game_active = False
+            self.username_input_active = False
+            self.bullets.empty()
+            self.aliens.empty()
+
+            self._create_fleet()
+            self.ship.center_ship()
+
+            pygame.mouse.set_visible(False)
+
+    def _check_keydown_events(self, event):
+        """Respond to keypresses."""
+        if event.key == pygame.K_RIGHT:
+            self.ship.moving_right = True
+        elif event.key == pygame.K_LEFT:
+            self.ship.moving_left = True
+        elif event.key == pygame.K_q:
+            self._save_high_scores()
+            sys.exit()
+        elif event.key == pygame.K_SPACE:
+            self._fire_bullet()
+
+    def _check_keyup_events(self, event):
+        """Respond to key releases."""
+        if event.key == pygame.K_RIGHT:
+            self.ship.moving_right = False
+        elif event.key == pygame.K_LEFT:
+            self.ship.moving_left = False
+
+    def _fire_bullet(self):
+        """Create a new bullet and add it to the bullets group."""
+        if len(self.bullets) < self.settings.bullets_allowed:
+            new_bullet = Bullet(self)
+            self.bullets.add(new_bullet)
+
+    def _update_bullets(self):
+        """Update position of bullets and get rid of old bullets."""
+        self.bullets.update()
+
+        for bullet in self.bullets.copy():
+            if bullet.rect.bottom <= 0:
+                self.bullets.remove(bullet)
+
+        self._check_bullet_alien_collisions()
+
+    def _check_bullet_alien_collisions(self):
+        """Respond to bullet-alien collisions."""
+        collisions = pygame.sprite.groupcollide(
+            self.bullets, self.aliens, True, True)
+
+        if collisions:
+            for aliens in collisions.values():
+                base_points = self.settings.alien_points * len(aliens)
+                penalty_points = self.penalty_per_alien * len(aliens)
+                bonus_points = self.bonus_per_alien * len(aliens)
+                self.stats.score += base_points - penalty_points + bonus_points
+                self._check_for_upgrade()  # Check for random upgrade
+            self.sb.prep_score()
+            self.sb.check_high_score()
+
+        if not self.aliens:
+            self.bullets.empty()
+            self._create_fleet()
+            self.settings.increase_speed()
+
+            self.stats.level += 1
+            self.sb.prep_level()  # Update the level display
+
+            if not self.high_score_mode:  # Only display level codes if not in high score mode
+                level_code = self._generate_level_code(self.stats.level)
+                print(f"Level {self.stats.level} completed! Your level code is: {level_code}")
+
+    def _check_for_upgrade(self):
+        """Randomly grant an upgrade when an alien is killed."""
+        drop_rate = 0.1  # Default drop rate: 10%
+        if self.social_score >= 1000:
+            drop_rate = 0.5  # Increase drop rate to 50% if social score is 1000 or more
+
+        if random.random() < drop_rate:
+            upgrade_type = random.choice(["double_speed", "double_fire_rate", "double_score", "+1_life"])
+            print(f"Upgrade granted: {upgrade_type}")
+            self._apply_upgrade(upgrade_type)
+
+    def _apply_upgrade(self, upgrade_type):
+        """Apply the given upgrade."""
+        self.upgrade_active = upgrade_type
+        duration = 10000  # Default duration: 10 seconds
+        if self.social_score >= 300:
+            duration = 60000  # Increase duration to 60 seconds if social score is 300 or more
+
+        self.upgrade_timer = pygame.time.get_ticks() + duration  # Set the timer with the calculated duration
+
+        if upgrade_type == "double_speed":
+            self.settings.ship_speed *= 2
+        elif upgrade_type == "double_fire_rate":
+            self.settings.bullet_speed *= 2
+        elif upgrade_type == "double_score":
+            self.settings.score_scale *= 2
+        elif upgrade_type == "+1_life":
+            self.stats.ships_left += 1
+            self.sb.prep_ships()
+
+    def _update_upgrades(self):
+        """Update and deactivate upgrades after their duration expires."""
+        if self.upgrade_active and pygame.time.get_ticks() > self.upgrade_timer:
+            print(f"Upgrade expired: {self.upgrade_active}")
+            if self.upgrade_active == "double_speed":
+                self.settings.ship_speed /= 2
+            elif self.upgrade_active == "double_fire_rate":
+                self.settings.bullet_speed /= 2
+            elif self.upgrade_active == "double_score":
+                self.settings.score_scale /= 2
+            self.upgrade_active = None
 
     def _update_screen(self):
         """Update images on the screen, and flip to the new screen."""
         self.screen.fill(self.settings.bg_color)
-        
+
         if self.title_screen_active:
             self._draw_title_screen()
         elif self.settings_page_active:
             self._draw_settings_page()
         elif self.username_input_active:
             self._draw_username_input()
-        elif self.game_active:
-            for bullet in self.bullets.sprites():
-                bullet.draw_bullet()
-            self.ship.blitme()
-            self.aliens.draw(self.screen)
-            self.sb.show_score()
-        else: 
-            if self.username: 
-                self.sb.show_score() 
-                self.play_button.draw_button()
-            else: 
-                self._draw_username_input() 
+        elif self.login_screen_active:
+            self._draw_login_screen()
+        elif self.registration_screen_active:
+            self._draw_registration_screen()
+        elif self.report_window_active:
+            self._draw_report_window()
+        else:
+            self.screen.fill(self.settings.bg_color)
 
-        if self.chat_update_pending:
-            self.chat_update_pending = False
+        # Draw the ship, bullets, and aliens
+        self.ship.blitme()
+        for bullet in self.bullets.sprites():
+            bullet.draw_bullet()
+        self.aliens.draw(self.screen)
 
-        self._draw_chat_window()
+        # Draw the scoreboard
+        self.sb.show_score()
+
         pygame.display.flip()
 
+        self._update_upgrades()  # Update upgrades
 
-if __name__ == '__main__':
-    ai = AlienInvasion()
-    ai.run_game()
+    def _draw_title_screen(self):
+        """Draw the title screen elements."""
+        self.screen.fill(self.settings.bg_color)
+        
+        title_text = "Alien Invasion"
+        title_image = self.title_font.render(title_text, True, self.settings.text_color, self.settings.bg_color)
+        title_rect = title_image.get_rect()
+        title_rect.centerx = self.screen_rect.centerx
+        title_rect.top = 100
+        self.screen.blit(title_image, title_rect)
+
+        if self.alien_title_image:
+            alien_rect = self.alien_title_image.get_rect()
+            alien_rect.centerx = self.screen_rect.centerx
+            alien_rect.top = title_rect.bottom + 20 
+            self.screen.blit(self.alien_title_image, alien_rect)
+            current_top = alien_rect.bottom + 50 
+        else:
+            current_top = title_rect.bottom + 50 
+
+        button_spacing = 20 
+
+        self.start_button.rect.centerx = self.screen_rect.centerx
+        self.start_button.rect.top = current_top
+        self.start_button.draw_button()
+
+        current_top += self.start_button.rect.height + button_spacing
+        self.settings_button.rect.centerx = self.screen_rect.centerx
+        self.settings_button.rect.top = current_top
+        self.settings_button.draw_button()
+        
+        current_top += self.settings_button.rect.height + button_spacing
+        self.exit_button.rect.centerx = self.screen_rect.centerx
+        self.exit_button.rect.top = current_top
+        self.exit_button.draw_button()
+
+        current_top += self.exit_button.rect.height + button_spacing
+        self.level_code_button.rect.centerx = self.screen_rect.centerx
+        self.level_code_button.rect.top = current_top
+        self.level_code_button.draw_button()
+
+        current_top += self.level_code_button.rect.height + button_spacing
+        self.high_score_mode_button.rect.centerx = self.screen_rect.centerx
+        self.high_score_mode_button.rect.top = current_top
+        self.high_score_mode_button.draw_button()
+
+        leaderboard_title_text = "Global Leaderboard"
+        leaderboard_title_image = self.font.render(leaderboard_title_text, True, self.settings.text_color, self.settings.bg_color)
+        leaderboard_title_rect = leaderboard_title_image.get_rect()
+        leaderboard_title_rect.centerx = self.screen_rect.centerx
+        leaderboard_title_rect.top = self.exit_button.rect.bottom + 40
+        self.screen.blit(leaderboard_title_image, leaderboard_title_rect)
+
+        leaderboard_y_start = leaderboard_title_rect.bottom + 15
+        for i, image in enumerate(self.global_leaderboard_images):
+            image_rect = image.get_rect()
+            image_rect.centerx = self.screen_rect.centerx
+            image_rect.top = leaderboard_y_start + (i * (self.leaderboard_font.get_height() + 5))
+            self.screen.blit(image, image_rect)
+
+        pygame.mouse.set_visible(True)
+
+    def _draw_settings_page(self):
+        """Draw the settings page with sliders."""
+        self.screen.fill(self.settings.bg_color)
+        
+        settings_title_img = self.title_font.render("Settings", True, self.settings.text_color, self.settings.bg_color)
+        settings_title_rect = settings_title_img.get_rect()
+        settings_title_rect.centerx = self.screen_rect.centerx
+        settings_title_rect.top = 50
+        self.screen.blit(settings_title_img, settings_title_rect)
+
+        for slider in self.settings_sliders:
+            slider.draw()
+        
+        self.back_button.rect.centerx = self.screen_rect.centerx
+        self.back_button.rect.bottom = self.screen_rect.bottom - 30
+        self.back_button.draw_button()
+        
+        pygame.mouse.set_visible(True)
+
+    def _draw_username_input(self):
+        """Draw the username input field on the screen."""
+        self.screen.fill(self.settings.bg_color) 
+        prompt_text = "Enter Username (Press Enter to Confirm):"
+        prompt_image = self.font.render(prompt_text, True, self.settings.text_color, self.settings.bg_color)
+        prompt_rect = prompt_image.get_rect()
+        prompt_rect.centerx = self.screen_rect.centerx
+        prompt_rect.centery = self.screen_rect.centery - 80 
+
+        input_field_width = 300 
+        input_field_height = 50
+        self.input_field_rect = pygame.Rect(0, 0, input_field_width, input_field_height) 
+        self.input_field_rect.centerx = self.screen_rect.centerx
+        self.input_field_rect.centery = self.screen_rect.centery - 25 
+        
+        pygame.draw.rect(self.screen, (230, 230, 230), self.input_field_rect) 
+        pygame.draw.rect(self.screen, (0,0,0), self.input_field_rect, 2) 
+
+        input_text_image = self.font.render(self.user_input, True, (0,0,0), (230,230,230)) 
+        input_text_rect = input_text_image.get_rect()
+        input_text_rect.left = self.input_field_rect.left + 10 
+        input_text_rect.centery = self.input_field_rect.centery
+        
+        self.screen.blit(prompt_image, prompt_rect)
+        self.screen.blit(input_text_image, input_text_rect)
+        
+        pygame.mouse.set_visible(True)
+
+    def _draw_login_screen(self):
+        """Draw the login screen."""
+        self.screen.fill(self.settings.bg_color)
+        font = pygame.font.SysFont(None, 36)
+
+        # Username input
+        username_label = font.render("Username:", True, self.settings.text_color)
+        username_label_rect = username_label.get_rect()
+        username_label_rect.topleft = (100, 150)
+        self.screen.blit(username_label, username_label_rect)
+
+        username_input_rect = pygame.Rect(250, 150, 200, 30)
+        pygame.draw.rect(self.screen, (255, 255, 255), username_input_rect)
+        pygame.draw.rect(self.screen, (0, 0, 0), username_input_rect, 2)
+        username_text = font.render(self.login_username, True, (0, 0, 0))
+        self.screen.blit(username_text, (username_input_rect.x + 5, username_input_rect.y + 5))
+
+        # Password input
+        password_label = font.render("Password:", True, self.settings.text_color)
+        password_label_rect = password_label.get_rect()
+        password_label_rect.topleft = (100, 200)
+        self.screen.blit(password_label, password_label_rect)
+
+        password_input_rect = pygame.Rect(250, 200, 200, 30)
+        pygame.draw.rect(self.screen, (255, 255, 255), password_input_rect)
+        pygame.draw.rect(self.screen, (0, 0, 0), password_input_rect, 2)
+        password_text = font.render("*" * len(self.login_password), True, (0, 0, 0))
+        self.screen.blit(password_text, (password_input_rect.x + 5, password_input_rect.y + 5))
+
+        # Buttons
+        login_button = Button(self, "Login")
+        login_button.rect.topleft = (250, 250)
+        login_button.draw_button()
+
+        register_button = Button(self, "Register")
+        register_button.rect.topleft = (250, 300)
+        register_button.draw_button()
+
+        pygame.mouse.set_visible(True)
+
+    def _handle_login_input(self, event):
+        """Handle input on the login screen."""
+        if event.key == pygame.K_TAB:
+            # Switch between username and password fields
+            pass
+        elif event.key == pygame.K_RETURN:
+            self._attempt_login()
+        elif event.key == pygame.K_BACKSPACE:
+            if self.login_password:
+                self.login_password = self.login_password[:-1]
+            elif self.login_username:
+                self.login_username = self.login_username[:-1]
+        else:
+            if len(self.login_username) < 20:
+                self.login_username += event.unicode
+            elif len(self.login_password) < 20:
+                self.login_password += event.unicode
+
+    def _attempt_login(self):
+        """Attempt to log in the user."""
+        try:
+            payload = {"username": self.login_username, "password": self.login_password}
+            response = requests.post(f"{self.server_url}/api/login", json=payload, timeout=5)
+            response.raise_for_status()
+            data = response.json()
+            if data.get("success"):
+                print("Login successful!")
+                self.username = self.login_username  # Set the username for display
+                self.login_screen_active = False
+                self.title_screen_active = True
+            else:
+                print("Login failed:", data.get("message"))
+        except requests.exceptions.RequestException as e:
+            print(f"Error during login: {e}")
+
+    def _draw_registration_screen(self):
+        """Draw the registration screen."""
+        self.screen.fill(self.settings.bg_color)
+        font = pygame.font.SysFont(None, 36)
+
+        # Username input
+        username_label = font.render("Username:", True, self.settings.text_color)
+        username_label_rect = username_label.get_rect()
+        username_label_rect.topleft = (100, 150)
+        self.screen.blit(username_label, username_label_rect)
+
+        username_input_rect = pygame.Rect(250, 150, 200, 30)
+        pygame.draw.rect(self.screen, (255, 255, 255), username_input_rect)
+        pygame.draw.rect(self.screen, (0, 0, 0), username_input_rect, 2)
+        username_text = font.render(self.registration_username, True, (0, 0, 0))
+        self.screen.blit(username_text, (username_input_rect.x + 5, username_input_rect.y + 5))
+
+        # Password input
+        password_label = font.render("Password:", True, self.settings.text_color)
+        password_label_rect = password_label.get_rect()
+        password_label_rect.topleft = (100, 200)
+        self.screen.blit(password_label, password_label_rect)
+
+        password_input_rect = pygame.Rect(250, 200, 200, 30)
+        pygame.draw.rect(self.screen, (255, 255, 255), password_input_rect)
+        pygame.draw.rect(self.screen, (0, 0, 0), password_input_rect, 2)
+        password_text = font.render("*" * len(self.registration_password), True, (0, 0, 0))
+        self.screen.blit(password_text, (password_input_rect.x + 5, password_input_rect.y + 5))
+
+        # Confirm password input
+        confirm_password_label = font.render("Confirm Password:", True, self.settings.text_color)
+        confirm_password_label_rect = confirm_password_label.get_rect()
+        confirm_password_label_rect.topleft = (100, 250)
+        self.screen.blit(confirm_password_label, confirm_password_label_rect)
+
+        confirm_password_input_rect = pygame.Rect(250, 250, 200, 30)
+        pygame.draw.rect(self.screen, (255, 255, 255), confirm_password_input_rect)
+        pygame.draw.rect(self.screen, (0, 0, 0), confirm_password_input_rect, 2)
+        confirm_password_text = font.render("*" * len(self.registration_confirm_password), True, (0, 0, 0))
+        self.screen.blit(confirm_password_text, (confirm_password_input_rect.x + 5, confirm_password_input_rect.y + 5))
+
+        # Buttons
+        register_button = Button(self, "Register")
+        register_button.rect.topleft = (250, 300)
+        register_button.draw_button()
+
+        back_button = Button(self, "Back")
+        back_button.rect.topleft = (250, 350)
+        back_button.draw_button()
+
+        pygame.mouse.set_visible(True)
+
+    def _handle_registration_input(self, event):
+        """Handle input on the registration screen."""
+        if event.key == pygame.K_TAB:
+            # Switch between fields (not implemented)
+            pass
+        elif event.key == pygame.K_RETURN:
+            self._attempt_registration()
+        elif event.key == pygame.K_BACKSPACE:
+            if self.registration_confirm_password:
+                self.registration_confirm_password = self.registration_confirm_password[:-1]
+            elif self.registration_password:
+                self.registration_password = self.registration_password[:-1]
+            elif self.registration_username:
+                self.registration_username = self.registration_username[:-1]
+        else:
+            if len(self.registration_username) < 20:
+                self.registration_username += event.unicode
+            elif len(self.registration_password) < 20:
+                self.registration_password += event.unicode
+            elif len(self.registration_confirm_password) < 20:
+                self.registration_confirm_password += event.unicode
+
+    def _attempt_registration(self):
+        """Attempt to register a new user."""
+        if self.registration_password != self.registration_confirm_password:
+            print("Passwords do not match!")
+            return
+
+        try:
+            payload = {"username": self.registration_username, "password": self.registration_password}
+            response = requests.post(f"{self.server_url}/api/register", json=payload, timeout=5)
+            response.raise_for_status()
+            data = response.json()
+            if data.get("success"):
+                print("Registration successful! You can now log in.")
+                self.registration_screen_active = False
+                self.login_screen_active = True
+            else:
+                print("Registration failed:", data.get("message"))
+        except requests.exceptions.RequestException as e:
+            print(f"Error during registration: {e}")
+
+    def _draw_report_window(self):
+        """Draw the report window."""
+        if self.report_window_active:
+            self.screen.fill(self.settings.bg_color)
+            font = pygame.font.SysFont(None, 36)
+
+            # Title
+            title_text = f"Report User: {self.selected_username}"
+            title_image = font.render(title_text, True, self.settings.text_color)
+            title_rect = title_image.get_rect()
+            title_rect.centerx = self.screen_rect.centerx
+            title_rect.top = 50
+            self.screen.blit(title_image, title_rect)
+
+            # Topics
+            topic_font = pygame.font.SysFont(None, 30)
+            y_offset = 150
+            self.report_topic_rects = []
+            for topic in self.report_topics:
+                topic_image = topic_font.render(topic, True, self.settings.text_color)
+                topic_rect = topic_image.get_rect()
+                topic_rect.centerx = self.screen_rect.centerx
+                topic_rect.top = y_offset
+                self.report_topic_rects.append((topic, topic_rect))
+                self.screen.blit(topic_image, topic_rect)
+                y_offset += 40
+
+            # Input box for additional details
+            if self.selected_report_topic:
+                details_label = font.render("Details (optional):", True, self.settings.text_color)
+                details_label_rect = details_label.get_rect()
+                details_label_rect.topleft = (50, y_offset + 20)
+                self.screen.blit(details_label, details_label_rect)
+
+                input_box_rect = pygame.Rect(50, y_offset + 60, 500, 30)
+                pygame.draw.rect(self.screen, (255, 255, 255), input_box_rect)
+                pygame.draw.rect(self.screen, (0, 0, 0), input_box_rect, 2)
+
+                input_text_image = font.render(self.report_details_input, True, (0, 0, 0))
+                self.screen.blit(input_text_image, (input_box_rect.left + 5, input_box_rect.top + 5))
+
+                # Submit Button
+                submit_button = Button(self, "Submit")
+                submit_button.rect.centerx = self.screen_rect.centerx
+                submit_button.rect.top = y_offset + 120
+                submit_button.draw_button()
+
+            # Back Button
+            back_button = Button(self, "Back")
+            back_button.rect.centerx = self.screen_rect.centerx
+            back_button.rect.top = y_offset + 180
+            back_button.draw_button()
+
+    def _handle_report_window_click(self, mouse_pos):
+        """Handle clicks in the report window."""
+        for topic, rect in self.report_topic_rects:
+            if rect.collidepoint(mouse_pos):
+                self.selected_report_topic = topic
+                self.report_details_active = True  # Activate the input box
+                return
+
+        # Check if submit button is clicked
+        if self.selected_report_topic:
+            submit_button_rect = pygame.Rect(
+                self.screen_rect.centerx - 50, self.report_topic_rects[-1][1].bottom + 120, 100, 30
+            )
+            if submit_button_rect.collidepoint(mouse_pos):
+                self._submit_report()
+                self.report_window_active = False
+                return
+
+        # Check if back button is clicked
+        back_button_rect = pygame.Rect(
+            self.screen_rect.centerx - 50, self.report_topic_rects[-1][1].bottom + 180, 100, 30
+        )
+        if back_button_rect.collidepoint(mouse_pos):
+            self.report_window_active = False
+
+    def _handle_report_window_input(self, event):
+        """Handle text input for the report details."""
+        if self.report_details_active:
+            if event.key == pygame.K_RETURN:
+                self.report_details_active = False  # Deactivate input box on Enter
+            elif event.key == pygame.K_BACKSPACE:
+                self.report_details_input = self.report_details_input[:-1]
+            elif len(self.report_details_input) < 200:  # Limit input length
+                self.report_details_input += event.unicode
+
+    def _submit_report(self):
+        """Submit the report for the selected user."""
+        try:
+            payload = {
+                "username": self.selected_username,
+                "type": "negative",
+                "reporter": self.username,
+                "reason": self.selected_report_topic,
+                "details": self.report_details_input,  # Include additional details
+            }
+            response = requests.post(f"{self.server_url}/api/chat/report", json=payload, timeout=5)
+            response.raise_for_status()
+            print(f"Reported user {self.selected_username}: {response.json().get('message')}")
+        except requests.exceptions.RequestException as e:
+            print(f"Error reporting user {self.selected_username}: {e}")
