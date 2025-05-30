@@ -79,19 +79,12 @@ class AlienInvasion:
         self.leaderboard_update_pending = False
         self.sse_thread = None
 
-<<<<<<< Updated upstream
         self.level_codes = {}  # Store level codes
         self.high_score_mode = False  # Flag to track if high score mode is active
+        self.high_score_mode_button = Button(self, "High Score Mode")  # Ensure button is initialized
 
         self._load_global_leaderboard()
         self._start_sse_listener()
-=======
-        self.high_score_mode = False  # Flag to track if high score mode is active
-        self.high_score_mode_button = Button(self, "High Score Mode")
-
-        self._load_global_leaderboard() 
-        self._start_sse_listener() 
->>>>>>> Stashed changes
 
     def _initialize_settings_sliders(self):
         """Create sliders for the settings page."""
@@ -310,10 +303,6 @@ class AlienInvasion:
             if not self.high_score_mode:  # Only display level codes if not in high score mode
                 level_code = self._generate_level_code(self.stats.level)
                 print(f"Level {self.stats.level} completed! Your level code is: {level_code}")
-<<<<<<< Updated upstream
-=======
-        # ...existing code...
->>>>>>> Stashed changes
 
     def _update_aliens(self):
         """Check if the fleet is at an edge, then update the positions of all aliens in the fleet."""
@@ -499,14 +488,12 @@ class AlienInvasion:
         self.high_score_mode_button.rect.centerx = self.screen_rect.centerx
         self.high_score_mode_button.rect.top = current_top
         self.high_score_mode_button.draw_button()
-<<<<<<< Updated upstream
-=======
 
         leaderboard_title_text = "Global Leaderboard"
         leaderboard_title_image = self.font.render(leaderboard_title_text, True, self.settings.text_color, self.settings.bg_color)
         leaderboard_title_rect = leaderboard_title_image.get_rect()
         leaderboard_title_rect.centerx = self.screen_rect.centerx
-        leaderboard_title_rect.top = self.exit_button.rect.bottom + 40 
+        leaderboard_title_rect.top = self.exit_button.rect.bottom + 40
         self.screen.blit(leaderboard_title_image, leaderboard_title_rect)
 
         leaderboard_y_start = leaderboard_title_rect.bottom + 15
@@ -515,9 +502,8 @@ class AlienInvasion:
             image_rect.centerx = self.screen_rect.centerx
             image_rect.top = leaderboard_y_start + (i * (self.leaderboard_font.get_height() + 5))
             self.screen.blit(image, image_rect)
-        
+
         pygame.mouse.set_visible(True)
->>>>>>> Stashed changes
 
     def _draw_settings_page(self):
         """Draw the settings page with sliders."""
