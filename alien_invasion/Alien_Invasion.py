@@ -85,6 +85,13 @@ class AlienInvasion:
         self.level_codes = {}  # Store level codes
         self.high_score_mode = False  # Flag to track if high score mode is active
 
+        self.chat_messages = []  # Store chat messages
+        self.chat_input_active = False
+        self.chat_user_input = ""
+        self.chat_update_pending = False
+        self.chat_thread = threading.Thread(target=self._listen_for_chat_updates, daemon=True)
+        self.chat_thread.start()
+
         self._load_global_leaderboard()
         self._start_sse_listener()
 
@@ -628,6 +635,90 @@ class AlienInvasion:
 
         print("SSE listener thread finished.")
 
+    def _listen_for_chat_updates(self):
+        """Listen for chat messages from the server."""
+        stream_url = f"{self.server_url}/stream"
+        print(f"Chat client: Connecting to {stream_url} for chat updates...")
+        while True:
+            try:
+                with requests.get(stream_url, stream=True, timeout=(5.0, 15.0)) as response:
+                    response.raise_for_status()
+                    for line in response.iter_lines():
+                        if line:
+                            decoded_line = line.decode('utf-8')
+                            if decoded_line.startswith('data:'):
+                                try:
+                                    message_data = decoded_line[len('data:'):].strip()
+                                    if not message_data:
+                                        continue
+                                    message = json.loads(message_data)
+                                    if message.get("type") == "chat_message":
+                                        self.chat_messages.append(f"{message['username']}: {message['message']}")
+                                        if len(self.chat_messages) > 50:  # Limit chat history
+                                            self.chat_messages.pop(0)
+                                        self.chat_update_pending = True
+                                except json.JSONDecodeError:
+                                    print(f"Chat client: Could not decode JSON: '{decoded_line}'")
+            except requests.exceptions.RequestException as e:
+                print(f"Chat client: Connection error: {e}. Retrying in 5 seconds...")
+                time.sleep(5)
+
+    def _send_chat_message(self, message):
+        """Send a chat message to the server."""
+        if not self.username:
+            print("Chat client: Cannot send message without a username.")
+            return
+        try:
+            payload = {"username": self.username, "message": message}
+            response = requests.post(f"{self.server_url}/api/chat", json=payload, timeout=5)
+            response.raise_for_status()
+            print("Chat client: Message sent successfully.")
+        except requests.exceptions.RequestException as e:
+            print(f"Chat client: Error sending message: {e}")
+
+    def _draw_chat_window(self):
+        """Draw the chat window on the screen."""
+        chat_window_width = 400
+        chat_window_height = 300
+        chat_window_rect = pygame.Rect(
+            self.screen_rect.right - chat_window_width - 20,
+            self.screen_rect.bottom - chat_window_height - 20,
+            chat_window_width,
+            chat_window_height
+        )
+        pygame.draw.rect(self.screen, (50, 50, 50), chat_window_rect)
+        pygame.draw.rect(self.screen, (200, 200, 200), chat_window_rect, 2)
+
+        font = pygame.font.SysFont(None, 24)
+        y_offset = chat_window_rect.top + 10
+        for message in self.chat_messages[-10:]:  # Display the last 10 messages
+            message_image = font.render(message, True, (255, 255, 255))
+            self.screen.blit(message_image, (chat_window_rect.left + 10, y_offset))
+            y_offset += font.get_height() + 5
+
+        input_rect = pygame.Rect(
+            chat_window_rect.left + 10,
+            chat_window_rect.bottom - 40,
+            chat_window_width - 20,
+            30
+        )
+        pygame.draw.rect(self.screen, (255, 255, 255), input_rect)
+        pygame.draw.rect(self.screen, (0, 0, 0), input_rect, 2)
+
+        input_text_image = font.render(self.chat_user_input, True, (0, 0, 0))
+        self.screen.blit(input_text_image, (input_rect.left + 5, input_rect.top + 5))
+
+    def _handle_chat_input(self, event):
+        """Handle chat input events."""
+        if event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER:
+            if self.chat_user_input:
+                self._send_chat_message(self.chat_user_input)
+                self.chat_user_input = ""
+        elif event.key == pygame.K_BACKSPACE:
+            self.chat_user_input = self.chat_user_input[:-1]
+        elif len(self.chat_user_input) < 100:
+            self.chat_user_input += event.unicode
+
     def _update_screen(self):
         """Update images on the screen, and flip to the new screen."""
         self.screen.fill(self.settings.bg_color)
@@ -651,6 +742,10 @@ class AlienInvasion:
             else: 
                 self._draw_username_input() 
 
+        if self.chat_update_pending:
+            self.chat_update_pending = False
+
+        self._draw_chat_window()
         pygame.display.flip()
 
 
