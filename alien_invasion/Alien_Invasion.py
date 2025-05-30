@@ -1,11 +1,10 @@
 import sys
 from time import sleep, time
-import json 
-import requests 
+import json
+import requests
 import pygame
-import os 
+import os
 import threading
-
 
 from settings import Settings
 from game_stats import GameStats
@@ -28,16 +27,16 @@ class AlienInvasion:
 
         self.screen = pygame.display.set_mode(
             (self.settings.screen_width, self.settings.screen_height))
-        self.screen_rect = self.screen.get_rect() 
+        self.screen_rect = self.screen.get_rect()
         pygame.display.set_caption("Alien Invasion")
 
-        self.username = "" 
+        self.username = ""
         self.user_input = ""
-        self.high_scores = {} 
-        self._load_high_scores() 
+        self.high_scores = {}
+        self._load_high_scores()
 
         self.stats = GameStats(self)
-        self.sb = Scoreboard(self) 
+        self.sb = Scoreboard(self)
 
         self.ship = Ship(self)
         self.bullets = pygame.sprite.Group()
@@ -47,49 +46,61 @@ class AlienInvasion:
 
         self.title_screen_active = True
         self.settings_page_active = False
-        self.username_input_active = False 
+        self.username_input_active = False
         self.game_active = False
+        self.level_code_input_active = False
 
         self.play_button = Button(self, "Play")
-        
         self.start_button = Button(self, "Start Game")
         self.settings_button = Button(self, "Settings")
         self.exit_button = Button(self, "Exit")
-        
+        self.level_code_button = Button(self, "Enter Level Code")
+        self.high_score_mode_button = Button(self, "High Score Mode")
         self.back_button = Button(self, "Back")
 
         self.font = pygame.font.SysFont(None, 48)
         self.title_font = pygame.font.SysFont(None, 72)
 
-        self.leaderboard_font = pygame.font.SysFont(None, 36) 
-        self.global_leaderboard_data = [] 
-        self.global_leaderboard_images = [] 
-        self.max_leaderboard_entries = 5 
+        self.leaderboard_font = pygame.font.SysFont(None, 36)
+        self.global_leaderboard_data = []
+        self.global_leaderboard_images = []
+        self.max_leaderboard_entries = 5
 
         try:
-            self.alien_title_image = pygame.image.load('images/alien_title.bmp') 
+            self.alien_title_image = pygame.image.load('images/alien_title.bmp')
         except pygame.error as e:
             print(f"Error loading title alien image: {e}")
-            self.alien_title_image = None 
+            self.alien_title_image = None
 
         self._initialize_settings_sliders()
-        self.server_url = "http://127.0.0.1:5000" 
-        
+        self.server_url = "http://127.0.0.1:5000"
+
         self.sse_client_running = False
         self.leaderboard_update_pending = False
         self.sse_thread = None
-        
+
+<<<<<<< Updated upstream
+        self.level_codes = {}  # Store level codes
+        self.high_score_mode = False  # Flag to track if high score mode is active
+
+        self._load_global_leaderboard()
+        self._start_sse_listener()
+=======
+        self.high_score_mode = False  # Flag to track if high score mode is active
+        self.high_score_mode_button = Button(self, "High Score Mode")
+
         self._load_global_leaderboard() 
         self._start_sse_listener() 
+>>>>>>> Stashed changes
 
     def _initialize_settings_sliders(self):
         """Create sliders for the settings page."""
         self.settings_sliders = []
         slider_width = 250
         slider_height = 20
-        slider_x = self.screen_rect.centerx - (slider_width / 2) 
+        slider_x = self.screen_rect.centerx - (slider_width / 2)
         start_y = 150
-        y_increment = 50 
+        y_increment = 50
 
         self.settings_sliders.append(Slider(self.screen, "Ship Limit", slider_x, start_y, slider_width, slider_height, 1, 10, self.settings.ship_limit))
         self.settings_sliders.append(Slider(self.screen, "Bullets Allowed", slider_x, start_y + y_increment, slider_width, slider_height, 1, 10, self.settings.bullets_allowed))
@@ -109,7 +120,7 @@ class AlienInvasion:
 
             if self.leaderboard_update_pending:
                 print("Leaderboard update detected by main loop, refreshing...")
-                self._load_global_leaderboard() 
+                self._load_global_leaderboard()
                 self.leaderboard_update_pending = False
 
             if self.game_active:
@@ -125,12 +136,12 @@ class AlienInvasion:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self._save_high_scores()
-                self.sse_client_running = False 
+                self.sse_client_running = False
                 if self.sse_thread and self.sse_thread.is_alive():
                     try:
-                        self.sse_thread.join(timeout=1.0) 
+                        self.sse_thread.join(timeout=1.0)
                     except RuntimeError:
-                        pass 
+                        pass
                 sys.exit()
 
             if event.type == pygame.KEYDOWN:
@@ -139,17 +150,17 @@ class AlienInvasion:
                         self._apply_slider_settings()
                         self.settings_page_active = False
                         self.title_screen_active = True
-                        continue  
+                        continue
                     else:
                         self._save_high_scores()
-                        self.sse_client_running = False 
+                        self.sse_client_running = False
                         if self.sse_thread and self.sse_thread.is_alive():
                             try:
-                                self.sse_thread.join(timeout=1.0) 
+                                self.sse_thread.join(timeout=1.0)
                             except RuntimeError:
-                                pass 
+                                pass
                         sys.exit()
-            
+
             if self.title_screen_active:
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     mouse_pos = pygame.mouse.get_pos()
@@ -168,7 +179,7 @@ class AlienInvasion:
                     self._check_keydown_events(event)
                 elif event.type == pygame.KEYUP:
                     self._check_keyup_events(event)
-            else:  
+            else:
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     mouse_pos = pygame.mouse.get_pos()
                     self._check_play_button(mouse_pos)
@@ -178,36 +189,43 @@ class AlienInvasion:
         if self.start_button.rect.collidepoint(mouse_pos):
             self.title_screen_active = False
             self.username_input_active = True
-            pygame.mouse.set_visible(True) 
+            pygame.mouse.set_visible(True)
         elif self.settings_button.rect.collidepoint(mouse_pos):
             self.title_screen_active = False
             self.settings_page_active = True
         elif self.exit_button.rect.collidepoint(mouse_pos):
             self._save_high_scores()
             sys.exit()
+        elif self.level_code_button.rect.collidepoint(mouse_pos):
+            self.title_screen_active = False
+            self.level_code_input_active = True
+        elif self.high_score_mode_button.rect.collidepoint(mouse_pos):
+            self.high_score_mode = True
+            self.title_screen_active = False
+            self.username_input_active = True
 
     def _check_settings_page_buttons(self, mouse_pos):
         """Check if any settings page buttons were clicked."""
         if self.back_button.rect.collidepoint(mouse_pos):
-            self._apply_slider_settings() 
+            self._apply_slider_settings()
             self.settings_page_active = False
             self.title_screen_active = True
 
     def _handle_username_input(self, event):
         """Handle keypresses during username input."""
         if event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER:
-            if self.user_input: 
+            if self.user_input:
                 self.username = self.user_input
                 self.username_input_active = False
-                self.user_input = "" 
-                self.sb.prep_score() 
-                self.sb.prep_high_score() 
+                self.user_input = ""
+                self.sb.prep_score()
+                self.sb.prep_high_score()
                 self.title_screen_active = False
                 self.settings_page_active = False
                 self.game_active = False
         elif event.key == pygame.K_BACKSPACE:
             self.user_input = self.user_input[:-1]
-        elif len(self.user_input) < 20: 
+        elif len(self.user_input) < 20:
             self.user_input += event.unicode
 
     def _check_play_button(self, mouse_pos):
@@ -215,15 +233,15 @@ class AlienInvasion:
         button_clicked = self.play_button.rect.collidepoint(mouse_pos)
         if button_clicked and not self.game_active and \
            not self.title_screen_active and not self.settings_page_active \
-           and not self.username_input_active and self.username: 
+           and not self.username_input_active and self.username:
             self.settings.initialize_dynamic_settings()
 
             self.stats.reset_stats()
             self.sb.prep_score()
-            self.sb.prep_high_score() 
+            self.sb.prep_high_score()
             self.sb.prep_level()
             self.sb.prep_ships()
-            
+
             self.title_screen_active = True
             self.game_active = False
             self.username_input_active = False
@@ -242,7 +260,7 @@ class AlienInvasion:
         elif event.key == pygame.K_LEFT:
             self.ship.moving_left = True
         elif event.key == pygame.K_q:
-            self._save_high_scores() 
+            self._save_high_scores()
             sys.exit()
         elif event.key == pygame.K_SPACE:
             self._fire_bullet()
@@ -287,13 +305,18 @@ class AlienInvasion:
             self.settings.increase_speed()
 
             self.stats.level += 1
-            self.sb.prep_level()
+            self.sb.prep_level()  # Update the level display
+
+            if not self.high_score_mode:  # Only display level codes if not in high score mode
+                level_code = self._generate_level_code(self.stats.level)
+                print(f"Level {self.stats.level} completed! Your level code is: {level_code}")
+<<<<<<< Updated upstream
+=======
+        # ...existing code...
+>>>>>>> Stashed changes
 
     def _update_aliens(self):
-        """
-        Check if the fleet is at an edge,
-          then update the positions of all aliens in the fleet.
-        """
+        """Check if the fleet is at an edge, then update the positions of all aliens in the fleet."""
         self._check_fleet_edges()
         self.aliens.update()
 
@@ -325,14 +348,13 @@ class AlienInvasion:
                 if self.stats.score > self.stats.high_score:
                     self.stats.high_score = self.stats.score
                     self.sb.prep_high_score()
-                
-                self._submit_score_to_global_leaderboard(self.username, self.stats.score) 
-            
+
+                self._submit_score_to_global_leaderboard(self.username, self.stats.score)
+
             self.user_input = ""
             self.title_screen_active = True
             self.username_input_active = False
-            self._load_global_leaderboard() 
-
+            self._load_global_leaderboard()
 
     def _create_fleet(self):
         """Create the fleet of aliens."""
@@ -390,10 +412,10 @@ class AlienInvasion:
             with open(filename) as f:
                 self.high_scores = json.load(f)
                 if self.high_scores:
-                    pass 
+                    pass
         except FileNotFoundError:
             pass
-        except json.JSONDecodeError: 
+        except json.JSONDecodeError:
             self.high_scores = {}
 
     def _load_global_leaderboard(self):
@@ -468,6 +490,18 @@ class AlienInvasion:
         self.exit_button.rect.top = current_top
         self.exit_button.draw_button()
 
+        current_top += self.exit_button.rect.height + button_spacing
+        self.level_code_button.rect.centerx = self.screen_rect.centerx
+        self.level_code_button.rect.top = current_top
+        self.level_code_button.draw_button()
+
+        current_top += self.level_code_button.rect.height + button_spacing
+        self.high_score_mode_button.rect.centerx = self.screen_rect.centerx
+        self.high_score_mode_button.rect.top = current_top
+        self.high_score_mode_button.draw_button()
+<<<<<<< Updated upstream
+=======
+
         leaderboard_title_text = "Global Leaderboard"
         leaderboard_title_image = self.font.render(leaderboard_title_text, True, self.settings.text_color, self.settings.bg_color)
         leaderboard_title_rect = leaderboard_title_image.get_rect()
@@ -483,6 +517,7 @@ class AlienInvasion:
             self.screen.blit(image, image_rect)
         
         pygame.mouse.set_visible(True)
+>>>>>>> Stashed changes
 
     def _draw_settings_page(self):
         """Draw the settings page with sliders."""
