@@ -67,6 +67,8 @@ class AlienInvasion:
         self.multiplayer_button = Button(self, "Multiplayer")  # Add Multiplayer button
         self.marketplace_button = Button(self, "Marketplace")  # Add Marketplace button
         self.achievements_button = Button(self, "Achievements")  # Add Achievements button
+        self.about_us_button = Button(self, "About Us")  # Add "About Us" button
+        self.contact_us_button = Button(self, "Contact Us")  # Add "Contact Us" button
 
         self.font = pygame.font.SysFont(None, 48)
         self.title_font = pygame.font.SysFont(None, 72)
@@ -83,7 +85,7 @@ class AlienInvasion:
             self.alien_title_image = None
 
         self._initialize_settings_sliders()
-        self.server_url = "http://127.0.0.1:5000"
+        self.server_url = "http://192.168.254.14:5555"  # Updated to connect to the leaderboard server
         self.use_tor = False  
         self.tor_proxy = "socks5h://127.0.0.1:9050"  
 
@@ -196,7 +198,26 @@ class AlienInvasion:
 
         self.win_music = "sounds/upbeat_music.mp3"
         self.lose_music = "sounds/dramatic_music.mp3"
+        self.background_music = "sounds/default_background_music.mp3"
+        self.is_admin = False  # Flag to determine if the user is an admin
         pygame.mixer.init()  # Initialize the mixer for playing sounds
+        self._start_background_music()
+
+        pygame.joystick.init()  # Initialize joystick support
+        self.joystick = None
+        self._initialize_joystick()
+
+        self.difficulty = "Easy"  # Default difficulty
+        self.difficulty_button = Button(self, f"Difficulty: {self.difficulty}")
+
+    def _initialize_joystick(self):
+        """Initialize the first connected joystick."""
+        if pygame.joystick.get_count() > 0:
+            self.joystick = pygame.joystick.Joystick(0)
+            self.joystick.init()
+            print(f"Joystick initialized: {self.joystick.get_name()}")
+        else:
+            print("No joystick detected.")
 
     def _initialize_settings_sliders(self):
         """Create sliders for the settings page."""
@@ -217,6 +238,34 @@ class AlienInvasion:
         self.settings_sliders.append(Slider(self.screen, "Score Scale", slider_x, start_y + 7 * y_increment, slider_width, slider_height, 1.0, 3.0, self.settings.score_scale, is_float=True))
         self.settings_sliders.append(Slider(self.screen, "Bullet Width", slider_x, start_y + 8 * y_increment, slider_width, slider_height, 1, 10, self.settings.bullet_width))
         self.settings_sliders.append(Slider(self.screen, "Bullet Height", slider_x, start_y + 9 * y_increment, slider_width, slider_height, 5, 30, self.settings.bullet_height))
+
+        self.control_mode = "Keyboard/Mouse"  # Default control mode
+        self.control_mode_button = Button(self, f"Control Mode: {self.control_mode}")
+
+    def _start_background_music(self):
+        """Start playing the background music."""
+        pygame.mixer.music.load(self.background_music)
+        pygame.mixer.music.play(-1)  # Loop the music indefinitely
+
+    def _change_background_music(self, new_music_path):
+        """Change the background music (admin only)."""
+        if self.is_admin:
+            try:
+                pygame.mixer.music.load(new_music_path)
+                pygame.mixer.music.play(-1)
+                self.background_music = new_music_path
+                print(f"Background music changed to: {new_music_path}")
+            except pygame.error as e:
+                print(f"Error loading music file: {e}")
+        else:
+            print("Only admins can change the background music.")
+
+    def _handle_server_commands(self, command):
+        """Handle commands sent by the server."""
+        if command.startswith("CHANGE_MUSIC:"):
+            new_music_path = command.split(":", 1)[1]
+            self._change_background_music(new_music_path)
+        # ...existing code for handling other commands...
 
     def run_game(self):
         """Start the main loop for the game."""
@@ -284,6 +333,8 @@ class AlienInvasion:
                     self._check_keydown_events(event)
                 elif event.type == pygame.KEYUP:
                     self._check_keyup_events(event)
+                elif event.type == pygame.JOYAXISMOTION or event.type == pygame.JOYBUTTONDOWN or event.type == pygame.JOYBUTTONUP:
+                    self._handle_joystick_input(event)
             elif self.login_screen_active:
                 self._handle_login_input(event)
             elif self.registration_screen_active:
@@ -292,6 +343,29 @@ class AlienInvasion:
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     mouse_pos = pygame.mouse.get_pos()
                     self._check_play_button(mouse_pos)
+
+    def _handle_joystick_input(self, event):
+        """Handle joystick input for movement and actions."""
+        if self.control_mode == "Controller":
+            if event.type == pygame.JOYAXISMOTION:
+                if event.axis == 0:  # Left stick horizontal
+                    if event.value > 0.5:
+                        self.ship.moving_right = True
+                        self.ship.moving_left = False
+                    elif event.value < -0.5:
+                        self.ship.moving_left = True
+                        self.ship.moving_right = False
+                    else:
+                        self.ship.moving_right = False
+                        self.ship.moving_left = False
+            elif event.type == pygame.JOYBUTTONDOWN:
+                if event.button == 0:  # "A" on Xbox or "Cross" on PlayStation
+                    self._fire_bullet()
+                elif event.button == 7:  # "Start" button
+                    self.game_active = not self.game_active
+            elif event.type == pygame.JOYBUTTON_UP:
+                if event.button == 0:  # Stop firing when "A" or "Cross" is released
+                    pass
 
     def _check_title_screen_buttons(self, mouse_pos):
         """Check if any title screen buttons were clicked."""
@@ -321,6 +395,17 @@ class AlienInvasion:
         elif self.achievements_button.rect.collidepoint(mouse_pos):
             self.title_screen_active = False
             self.achievements_active = True
+        elif self.about_us_button.rect.collidepoint(mouse_pos):
+            self.title_screen_active = False
+            self.about_us_active = True
+        elif self.contact_us_button.rect.collidepoint(mouse_pos):
+            self.title_screen_active = False
+            self.contact_us_active = True
+
+        # Check if the GitHub link was clicked
+        if self.github_link_rect.collidepoint(mouse_pos):
+            import webbrowser
+            webbrowser.open("https://www.github.com/bentted")
 
     def _check_settings_page_buttons(self, mouse_pos):
         """Check if any settings page buttons were clicked."""
@@ -328,6 +413,54 @@ class AlienInvasion:
             self._apply_slider_settings()
             self.settings_page_active = False
             self.title_screen_active = True
+        elif self.control_mode_button.rect.collidepoint(mouse_pos):
+            self._toggle_control_mode()
+        elif self.difficulty_button.rect.collidepoint(mouse_pos):
+            self._toggle_difficulty()
+
+    def _toggle_control_mode(self):
+        """Toggle between controller and keyboard/mouse controls."""
+        if self.control_mode == "Keyboard/Mouse":
+            self.control_mode = "Controller"
+        else:
+            self.control_mode = "Keyboard/Mouse"
+        self.control_mode_button.msg = f"Control Mode: {self.control_mode}"
+        self.control_mode_button._prep_msg()
+
+    def _toggle_difficulty(self):
+        """Toggle between difficulty levels."""
+        if self.difficulty == "Easy":
+            self.difficulty = "Hard"
+        elif self.difficulty == "Hard":
+            self.difficulty = "Impossible"
+        else:
+            self.difficulty = "Easy"
+        self.difficulty_button.msg = f"Difficulty: {self.difficulty}"
+        self.difficulty_button._prep_msg()
+
+    def _apply_slider_settings(self):
+        """Apply the settings from the sliders."""
+        for slider in self.settings_sliders:
+            slider.apply_settings()
+
+    def _apply_difficulty_settings(self):
+        """Apply settings based on the selected difficulty."""
+        if self.difficulty == "Easy":
+            self.settings.initialize_dynamic_settings()
+        elif self.difficulty == "Hard":
+            self.settings.ship_speed *= 10
+            self.settings.bullet_speed *= 10
+            self.settings.alien_speed *= 10
+            self.settings.fleet_drop_speed *= 10
+            self.settings.speedup_scale *= 10
+            self.settings.score_scale *= 10
+        elif self.difficulty == "Impossible":
+            self.settings.ship_speed *= 30
+            self.settings.bullet_speed *= 30
+            self.settings.alien_speed *= 30
+            self.settings.fleet_drop_speed *= 30
+            self.settings.speedup_scale *= 30
+            self.settings.score_scale *= 30
 
     def _load_user_penalty(self):
         """Load the penalty score for the current user."""
@@ -375,12 +508,13 @@ class AlienInvasion:
             self.user_input += event.unicode
 
     def _check_play_button(self, mouse_pos):
-        """Start a new game when the player clicks Play (original button)."""
+        """Start a new game when the player clicks Play."""
         button_clicked = self.play_button.rect.collidepoint(mouse_pos)
         if button_clicked and not self.game_active and \
            not self.title_screen_active and not self.settings_page_active \
-           and not self.username_input_active and self.username:
+           and not self.username_input_active and self.username and not self.high_score_mode:
             self.settings.initialize_dynamic_settings()
+            self._apply_difficulty_settings()  # Apply difficulty settings
 
             self.stats.reset_stats()
             self.sb.prep_score()
@@ -401,22 +535,24 @@ class AlienInvasion:
 
     def _check_keydown_events(self, event):
         """Respond to keypresses."""
-        if event.key == pygame.K_RIGHT:
-            self.ship.moving_right = True
-        elif event.key == pygame.K_LEFT:
-            self.ship.moving_left = True
-        elif event.key == pygame.K_q:
-            self._save_high_scores()
-            sys.exit()
-        elif event.key == pygame.K_SPACE:
-            self._fire_bullet()
+        if self.control_mode == "Keyboard/Mouse":
+            if event.key == pygame.K_RIGHT:
+                self.ship.moving_right = True
+            elif event.key == pygame.K_LEFT:
+                self.ship.moving_left = True
+            elif event.key == pygame.K_q:
+                self._save_high_scores()
+                sys.exit()
+            elif event.key == pygame.K_SPACE:
+                self._fire_bullet()
 
     def _check_keyup_events(self, event):
         """Respond to key releases."""
-        if event.key == pygame.K_RIGHT:
-            self.ship.moving_right = False
-        elif event.key == pygame.K_LEFT:
-            self.ship.moving_left = False
+        if self.control_mode == "Keyboard/Mouse":
+            if event.key == pygame.K_RIGHT:
+                self.ship.moving_right = False
+            elif event.key == pygame.K_LEFT:
+                self.ship.moving_left = False
 
     def _fire_bullet(self):
         """Create a new bullet and add it to the bullets group."""
@@ -522,6 +658,10 @@ class AlienInvasion:
             self._draw_marketplace()
         elif self.achievements_active:
             self._draw_achievements_screen()
+        elif self.about_us_active:
+            self._draw_about_us_page()
+        elif self.contact_us_active:
+            self._draw_contact_us_page()
         else:
             self.screen.fill(self.settings.bg_color)
 
@@ -598,6 +738,16 @@ class AlienInvasion:
         self.achievements_button.rect.top = current_top
         self.achievements_button.draw_button()
 
+        current_top += self.achievements_button.rect.height + button_spacing
+        self.about_us_button.rect.centerx = self.screen_rect.centerx
+        self.about_us_button.rect.top = current_top
+        self.about_us_button.draw_button()
+
+        current_top += self.about_us_button.rect.height + button_spacing
+        self.contact_us_button.rect.centerx = self.screen_rect.centerx
+        self.contact_us_button.rect.top = current_top
+        self.contact_us_button.draw_button()
+
         leaderboard_title_text = "Global Leaderboard"
         leaderboard_title_image = self.font.render(leaderboard_title_text, True, self.settings.text_color, self.settings.bg_color)
         leaderboard_title_rect = leaderboard_title_image.get_rect()
@@ -611,6 +761,15 @@ class AlienInvasion:
             image_rect.centerx = self.screen_rect.centerx
             image_rect.top = leaderboard_y_start + (i * (self.leaderboard_font.get_height() + 5))
             self.screen.blit(image, image_rect)
+
+        # Draw the GitHub link at the bottom of the screen
+        link_text = "Visit www.github.com/bentted"
+        link_image = self.font.render(link_text, True, (0, 0, 255))  # Blue color for the link
+        link_rect = link_image.get_rect()
+        link_rect.centerx = self.screen_rect.centerx
+        link_rect.bottom = self.screen_rect.bottom - 10
+        self.screen.blit(link_image, link_rect)
+        self.github_link_rect = link_rect  # Save the rect for click detection
 
         pygame.mouse.set_visible(True)
 
@@ -630,6 +789,14 @@ class AlienInvasion:
         self.back_button.rect.centerx = self.screen_rect.centerx
         self.back_button.rect.bottom = self.screen_rect.bottom - 30
         self.back_button.draw_button()
+
+        self.control_mode_button.rect.centerx = self.screen_rect.centerx
+        self.control_mode_button.rect.top = self.back_button.rect.top - 50
+        self.control_mode_button.draw_button()
+
+        self.difficulty_button.rect.centerx = self.screen_rect.centerx
+        self.difficulty_button.rect.top = self.control_mode_button.rect.top - 50
+        self.difficulty_button.draw_button()
         
         pygame.mouse.set_visible(True)
 
@@ -957,7 +1124,7 @@ class AlienInvasion:
     def _start_server(self):
         """Start the server for multiplayer."""
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server_socket.bind(("0.0.0.0", 5555))
+        self.server_socket.bind(("192.168.254.14", 5555))  # Host on specified IP and port
         self.server_socket.listen(1)
         print("Waiting for opponent to connect...")
         self.client_socket, _ = self.server_socket.accept()
@@ -968,7 +1135,7 @@ class AlienInvasion:
     def _connect_to_server(self):
         """Connect to the server for multiplayer."""
         self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.client_socket.connect(("127.0.0.1", 5555))
+        self.client_socket.connect(("192.168.254.14", 5555))  # Connect to specified IP and port
         print("Connected to the host!")
         self.network_thread = threading.Thread(target=self._handle_network_communication, daemon=True)
         self.network_thread.start()
@@ -978,7 +1145,10 @@ class AlienInvasion:
         while True:
             try:
                 data = self.client_socket.recv(1024).decode()
-                if data == "GAME_OVER":
+                if data.startswith("COMMAND:"):
+                    command = data.split(":", 1)[1]
+                    self._handle_server_commands(command)
+                elif data == "GAME_OVER":
                     self._end_multiplayer_game(winner="self")
                 elif data.startswith("ALIEN:"):
                     alien_data = json.loads(data[6:])
@@ -1122,260 +1292,88 @@ class AlienInvasion:
             return False
         return True
 
-    def _draw_marketplace(self):
-        """Draw the marketplace screen."""
+    def _draw_about_us_page(self):
+        """Draw the 'About Us' page."""
         self.screen.fill(self.settings.bg_color)
-        title_text = "Marketplace"
+
+        title_text = "About Us"
         title_image = self.title_font.render(title_text, True, self.settings.text_color)
         title_rect = title_image.get_rect()
         title_rect.centerx = self.screen_rect.centerx
         title_rect.top = 50
         self.screen.blit(title_image, title_rect)
 
-        y_offset = 150
-        for item in self.marketplace_items:
-            item_text = f"{item['name']} - {item['cost']} Credits"
-            item_image = self.font.render(item_text, True, self.settings.text_color)
-            item_rect = item_image.get_rect()
-            item_rect.centerx = self.screen_rect.centerx
-            item_rect.top = y_offset
-            self.screen.blit(item_image, item_rect)
-            y_offset += 50
-
-        # Add ship skins to the marketplace
-        for skin in self.available_ship_skins:
-            status = "Unlocked" if skin["unlocked"] else f"{skin['cost']} Credits"
-            skin_text = f"{skin['name']} - {status}"
-            skin_image = self.font.render(skin_text, True, self.settings.text_color)
-            skin_rect = skin_image.get_rect()
-            skin_rect.centerx = self.screen_rect.centerx
-            skin_rect.top = y_offset
-            self.screen.blit(skin_image, skin_rect)
-            skin["rect"] = pygame.Rect(self.screen_rect.centerx - 150, y_offset, 300, 40)
-            y_offset += 50
-
-        # Add alien skins to the marketplace
-        for skin in self.available_alien_skins:
-            status = "Unlocked" if skin["unlocked"] else f"{skin['cost']} Credits"
-            skin_text = f"{skin['name']} - {status}"
-            skin_image = self.font.render(skin_text, True, self.settings.text_color)
-            skin_rect = skin_image.get_rect()
-            skin_rect.centerx = self.screen_rect.centerx
-            skin_rect.top = y_offset
-            self.screen.blit(skin_image, skin_rect)
-            skin["rect"] = pygame.Rect(self.screen_rect.centerx - 150, y_offset, 300, 40)
-            y_offset += 50
-
-        # Add backgrounds to the marketplace
-        for background in self.available_backgrounds:
-            status = "Unlocked" if background["unlocked"] else f"{background['cost']} Credits"
-            background_text = f"{background['name']} - {status}"
-            background_image = self.font.render(background_text, True, self.settings.text_color)
-            background_rect = background_image.get_rect()
-            background_rect.centerx = self.screen_rect.centerx
-            background_rect.top = y_offset
-            self.screen.blit(background_image, background_rect)
-            background["rect"] = pygame.Rect(self.screen_rect.centerx - 150, y_offset, 300, 40)
-            y_offset += 50
+        about_text = (
+            "Wasser Development is a self-taught software engineer.\n"
+            "This project has taken about 2 years to reach this point.\n"
+            "We are open and willing to accept contributions to this project\n"
+            "and any of our other projects at:\n"
+            "github.com/bentted"
+        )
+        lines = about_text.split("\n")
+        y_offset = title_rect.bottom + 30
+        for line in lines:
+            line_image = self.font.render(line, True, self.settings.text_color)
+            line_rect = line_image.get_rect()
+            line_rect.centerx = self.screen_rect.centerx
+            line_rect.top = y_offset
+            self.screen.blit(line_image, line_rect)
+            y_offset += 40
 
         back_button = Button(self, "Back")
         back_button.rect.centerx = self.screen_rect.centerx
         back_button.rect.top = y_offset + 50
         back_button.draw_button()
-        self.marketplace_back_button = back_button
+        self.about_us_back_button = back_button
 
         pygame.mouse.set_visible(True)
 
-    def _check_marketplace_buttons(self, mouse_pos):
-        """Check if any marketplace buttons were clicked."""
-        if self.marketplace_back_button.rect.collidepoint(mouse_pos):
-            self.marketplace_active = False
-            self.title_screen_active = True
-        else:
-            y_offset = 150
-            for item in self.marketplace_items:
-                item_rect = pygame.Rect(
-                    self.screen_rect.centerx - 150, y_offset, 300, 40
-                )
-                if item_rect.collidepoint(mouse_pos):
-                    self._purchase_item(item)
-                y_offset += 50
-
-            # Check for ship skin purchases
-            for skin in self.available_ship_skins:
-                if skin["rect"].collidepoint(mouse_pos):
-                    self._purchase_ship_skin(skin)
-
-            # Check for alien skin purchases
-            for skin in self.available_alien_skins:
-                if skin["rect"].collidepoint(mouse_pos):
-                    self._purchase_alien_skin(skin)
-
-            # Check for background purchases
-            for background in self.available_backgrounds:
-                if background["rect"].collidepoint(mouse_pos):
-                    self._purchase_background(background)
-
-    def _purchase_alien_skin(self, skin):
-        """Handle purchasing or selecting an alien skin."""
-        if skin["unlocked"]:
-            self.current_alien_skin = skin
-            for alien in self.aliens:
-                alien.image = pygame.image.load(skin["image"])
-            print(f"Alien skin changed to: {skin['name']}")
-        elif self.player_currency >= skin["cost"]:
-            self.player_currency -= skin["cost"]
-            skin["unlocked"] = True
-            print(f"Purchased and equipped alien skin: {skin['name']}")
-            self.current_alien_skin = skin
-            for alien in self.aliens:
-                alien.image = pygame.image.load(skin["image"])
-        else:
-            print("Not enough credits to purchase this skin.")
-
-    def _purchase_item(self, item):
-        """Handle purchasing an item from the marketplace."""
-        if self.player_currency >= item["cost"]:
-            self.player_currency -= item["cost"]
-            print(f"Purchased {item['name']} for {item['cost']} credits.")
-            if item["type"] == "ship":
-                self._unlock_new_ship()
-            elif item["type"] == "alien":
-                self._unlock_new_alien_skin()
-            elif item["type"] == "upgrade":
-                self._apply_upgrade(item["effect"])
-        else:
-            print("Not enough credits to purchase this item.")
-
-    def _unlock_new_ship(self):
-        """Unlock a new ship for the player."""
-        print("New ship unlocked!")
-
-    def _unlock_new_alien_skin(self):
-        """Unlock a new alien skin for the player."""
-        print("New alien skin unlocked!")
-
-    def _apply_upgrade(self, effect):
-        """Apply an upgrade to the player."""
-        if effect == "speed":
-            self.settings.ship_speed += 0.5
-            print("Speed upgraded!")
-        elif effect == "fire_rate":
-            self.settings.bullet_speed += 0.5
-            print("Fire rate upgraded!")
-        elif effect == "life":
-            self.stats.ships_left += 1
-            self.sb.prep_ships()
-            print("Extra life added!")
-
-    def _purchase_background(self, background):
-        """Handle purchasing or selecting a background."""
-        if background["unlocked"]:
-            self.current_background = background
-            self.background_image = pygame.image.load(background["image"])
-            print(f"Background changed to: {background['name']}")
-        elif self.player_currency >= background["cost"]:
-            self.player_currency -= background["cost"]
-            background["unlocked"] = True
-            print(f"Purchased and equipped background: {background['name']}")
-            self.current_background = background
-            self.background_image = pygame.image.load(background["image"])
-        else:
-            print("Not enough credits to purchase this background.")
-
-    def _check_for_chest_drop(self):
-        """Check if a chest should drop based on the score."""
-        if self.stats.score - self.last_chest_drop_score >= self.chest_drop_threshold:
-            self.last_chest_drop_score = self.stats.score
-            self._drop_chest()
-
-    def _drop_chest(self):
-        """Handle the chest drop and apply a random upgrade."""
-        upgrades = ["double_speed", "double_fire_rate", "double_score"]
-        self.active_chest_upgrade = random.choice(upgrades)
-        print(f"Chest dropped! Upgrade applied: {self.active_chest_upgrade}")
-
-        if self.active_chest_upgrade == "double_speed":
-            self.settings.ship_speed *= 2
-        elif self.active_chest_upgrade == "double_fire_rate":
-            self.settings.bullet_speed *= 2
-        elif self.active_chest_upgrade == "double_score":
-            self.settings.score_scale *= 2
-
-        self.chests_collected += 1  # Increment chests collected
-
-    def _reset_chest_upgrade(self):
-        """Reset the chest upgrade when the player loses a life."""
-        if self.active_chest_upgrade:
-            print(f"Chest upgrade expired: {self.active_chest_upgrade}")
-            if self.active_chest_upgrade == "double_speed":
-                self.settings.ship_speed /= 2
-            elif self.active_chest_upgrade == "double_fire_rate":
-                self.settings.bullet_speed /= 2
-            elif self.active_chest_upgrade == "double_score":
-                self.settings.score_scale /= 2
-            self.active_chest_upgrade = None
-
-    def _ship_hit(self):
-        """Respond to the ship being hit by an alien."""
-        self._reset_chest_upgrade()  # Reset chest upgrade on life loss
-
-    def _draw_achievements_screen(self):
-        """Draw the achievements screen."""
+    def _draw_contact_us_page(self):
+        """Draw the 'Contact Us' page."""
         self.screen.fill(self.settings.bg_color)
-        title_text = "Achievements"
+
+        title_text = "Contact Us"
         title_image = self.title_font.render(title_text, True, self.settings.text_color)
         title_rect = title_image.get_rect()
         title_rect.centerx = self.screen_rect.centerx
         title_rect.top = 50
         self.screen.blit(title_image, title_rect)
 
-        y_offset = 150
-        for achievement in self.achievements:
-            status = "Unlocked" if achievement["unlocked"] else "Locked"
-            achievement_text = f"{achievement['name']} - {achievement['description']} ({status})"
-            achievement_image = self.font.render(achievement_text, True, self.settings.text_color)
-            achievement_rect = achievement_image.get_rect()
-            achievement_rect.centerx = self.screen_rect.centerx
-            achievement_rect.top = y_offset
-            self.screen.blit(achievement_image, achievement_rect)
-            y_offset += 50
+        github_text = "GitHub: github.com/bentted"
+        github_image = self.font.render(github_text, True, (0, 0, 255))  # Blue color for the link
+        github_rect = github_image.get_rect()
+        github_rect.centerx = self.screen_rect.centerx
+        github_rect.top = title_rect.bottom + 30
+        self.screen.blit(github_image, github_rect)
+        self.github_link_rect = github_rect  # Save the rect for click detection
+
+        tor_text = "Tor Site: http://blkhatjxlrvc5aevqzz5t6kxldayog6jlx5h7glnu44euzongl4fh5ad.onion/index.php-FeuerWasser"
+        tor_image = self.font.render(tor_text, True, (0, 0, 255))  # Blue color for the link
+        tor_rect = tor_image.get_rect()
+        tor_rect.centerx = self.screen_rect.centerx
+        tor_rect.top = github_rect.bottom + 20
+        self.screen.blit(tor_image, tor_rect)
+        self.tor_link_rect = tor_rect  # Save the rect for click detection
 
         back_button = Button(self, "Back")
         back_button.rect.centerx = self.screen_rect.centerx
-        back_button.rect.top = y_offset + 50
+        back_button.rect.top = tor_rect.bottom + 50
         back_button.draw_button()
-        self.achievements_back_button = back_button
+        self.contact_us_back_button = back_button
 
         pygame.mouse.set_visible(True)
 
-    def _check_achievements_buttons(self, mouse_pos):
-        """Check if any achievements screen buttons were clicked."""
-        if self.achievements_back_button.rect.collidepoint(mouse_pos):
-            self.achievements_active = False
+    def _check_contact_us_buttons(self, mouse_pos):
+        """Check if any 'Contact Us' page buttons were clicked."""
+        if self.github_link_rect.collidepoint(mouse_pos):
+            import webbrowser
+            webbrowser.open("https://www.github.com/bentted")
+        elif self.tor_link_rect.collidepoint(mouse_pos):
+            import webbrowser
+            webbrowser.open("http://blkhatjxlrvc5aevqzz5t6kxldayog6jlx5h7glnu44euzongl4fh5ad.onion/index.php-FeuerWasser")
+        elif self.contact_us_back_button.rect.collidepoint(mouse_pos):
+            self.contact_us_active = False
             self.title_screen_active = True
-
-    def _update_achievements(self):
-        """Update achievements based on game progress."""
-        if not self.achievements[0]["unlocked"] and self.stats.score > 0:
-            self.achievements[0]["unlocked"] = True
-            print("Achievement unlocked: First Blood")
-
-        if not self.achievements[1]["unlocked"] and self.stats.aliens_destroyed >= 50:
-            self.achievements[1]["unlocked"] = True
-            print("Achievement unlocked: Sharp Shooter")
-
-        if not self.achievements[2]["unlocked"] and self.stats.level >= 5:
-            self.achievements[2]["unlocked"] = True
-            print("Achievement unlocked: Survivor")
-
-        if not self.achievements[3]["unlocked"] and self.chests_collected >= 5:
-            self.achievements[3]["unlocked"] = True
-            print("Achievement unlocked: Chest Collector")
-
-        if not self.achievements[4]["unlocked"] and self.stats.score >= 10000:
-            self.achievements[4]["unlocked"] = True
-            print("Achievement unlocked: High Scorer")
 
     def _update_screen(self):
         """Update images on the screen, and flip to the new screen."""
@@ -1397,6 +1395,10 @@ class AlienInvasion:
             self._draw_marketplace()
         elif self.achievements_active:
             self._draw_achievements_screen()
+        elif self.about_us_active:
+            self._draw_about_us_page()
+        elif self.contact_us_active:
+            self._draw_contact_us_page()
         else:
             self.screen.fill(self.settings.bg_color)
 
@@ -1473,6 +1475,16 @@ class AlienInvasion:
         self.achievements_button.rect.top = current_top
         self.achievements_button.draw_button()
 
+        current_top += self.achievements_button.rect.height + button_spacing
+        self.about_us_button.rect.centerx = self.screen_rect.centerx
+        self.about_us_button.rect.top = current_top
+        self.about_us_button.draw_button()
+
+        current_top += self.about_us_button.rect.height + button_spacing
+        self.contact_us_button.rect.centerx = self.screen_rect.centerx
+        self.contact_us_button.rect.top = current_top
+        self.contact_us_button.draw_button()
+
         leaderboard_title_text = "Global Leaderboard"
         leaderboard_title_image = self.font.render(leaderboard_title_text, True, self.settings.text_color, self.settings.bg_color)
         leaderboard_title_rect = leaderboard_title_image.get_rect()
@@ -1486,6 +1498,15 @@ class AlienInvasion:
             image_rect.centerx = self.screen_rect.centerx
             image_rect.top = leaderboard_y_start + (i * (self.leaderboard_font.get_height() + 5))
             self.screen.blit(image, image_rect)
+
+        # Draw the GitHub link at the bottom of the screen
+        link_text = "Visit www.github.com/bentted"
+        link_image = self.font.render(link_text, True, (0, 0, 255))  # Blue color for the link
+        link_rect = link_image.get_rect()
+        link_rect.centerx = self.screen_rect.centerx
+        link_rect.bottom = self.screen_rect.bottom - 10
+        self.screen.blit(link_image, link_rect)
+        self.github_link_rect = link_rect  # Save the rect for click detection
 
         pygame.mouse.set_visible(True)
 
@@ -1505,6 +1526,14 @@ class AlienInvasion:
         self.back_button.rect.centerx = self.screen_rect.centerx
         self.back_button.rect.bottom = self.screen_rect.bottom - 30
         self.back_button.draw_button()
+
+        self.control_mode_button.rect.centerx = self.screen_rect.centerx
+        self.control_mode_button.rect.top = self.back_button.rect.top - 50
+        self.control_mode_button.draw_button()
+
+        self.difficulty_button.rect.centerx = self.screen_rect.centerx
+        self.difficulty_button.rect.top = self.control_mode_button.rect.top - 50
+        self.difficulty_button.draw_button()
         
         pygame.mouse.set_visible(True)
 
@@ -1694,7 +1723,7 @@ class AlienInvasion:
             else:
                 print("Registration failed:", data.get("message"))
         except requests.exceptions.RequestException as e:
-            print(f"Error during registration: {e}")
+                       print(f"Error during registration: {e}")
 
     def _draw_report_window(self):
         """Draw the report window."""
@@ -1832,7 +1861,7 @@ class AlienInvasion:
     def _start_server(self):
         """Start the server for multiplayer."""
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server_socket.bind(("0.0.0.0", 5555))
+        self.server_socket.bind(("192.168.254.14", 5555))  # Host on specified IP and port
         self.server_socket.listen(1)
         print("Waiting for opponent to connect...")
         self.client_socket, _ = self.server_socket.accept()
@@ -1843,7 +1872,7 @@ class AlienInvasion:
     def _connect_to_server(self):
         """Connect to the server for multiplayer."""
         self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.client_socket.connect(("127.0.0.1", 5555))
+        self.client_socket.connect(("192.168.254.14", 5555))  # Connect to specified IP and port
         print("Connected to the host!")
         self.network_thread = threading.Thread(target=self._handle_network_communication, daemon=True)
         self.network_thread.start()
@@ -1853,7 +1882,10 @@ class AlienInvasion:
         while True:
             try:
                 data = self.client_socket.recv(1024).decode()
-                if data == "GAME_OVER":
+                if data.startswith("COMMAND:"):
+                    command = data.split(":", 1)[1]
+                    self._handle_server_commands(command)
+                elif data == "GAME_OVER":
                     self._end_multiplayer_game(winner="self")
                 elif data.startswith("ALIEN:"):
                     alien_data = json.loads(data[6:])

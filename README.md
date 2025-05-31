@@ -13,14 +13,28 @@ Alien Invasion is a feature-rich 2D space shooter game built using Python and Py
 - **Score System**: Earn points for destroying aliens and completing levels.
 
 ### 2. **Multiplayer Mode**
-- **Host or Join**: Play with friends by hosting or joining a multiplayer game.
-- **Alien Sharing**: Send aliens to your opponent's screen to increase their difficulty.
-- **Win/Loss Tracking**: Multiplayer stats track your wins and losses.
+
+Alien Invasion now supports a multiplayer mode where players can compete against each other. Features include:
+
+- **Random Matchmaking**: Join a queue to be matched with another player.
+- **Host or Join**: Players can choose to host a game or join an existing one.
+- **Opponent Aliens**: Send aliens to your opponent to increase the challenge.
+
+### How to Start Multiplayer
+1. From the title screen, click the "Multiplayer" button.
+2. Choose to host a game or join a random match.
+3. Play against your opponent and try to win!
 
 ### 3. **Voice Chat**
-- **Real-Time Communication**: Use voice chat during multiplayer games.
-- **Host and Client Support**: Voice chat works seamlessly for both hosts and clients.
-- **Kick and Ban**: Players kicked from chat have voice chat disabled for 3 days.
+
+The game also includes a voice chat feature for multiplayer mode. Players can communicate with each other during the game.
+
+### How to Use Voice Chat
+- Voice chat starts automatically when a multiplayer game begins.
+- Ensure your microphone and speakers are properly configured.
+
+### Restrictions
+- Voice chat may be disabled for users who have been reported or kicked for inappropriate behavior.
 
 ### 4. **Marketplace**
 - **Purchase Items**: Spend in-game currency to buy ships, alien skins, and upgrades.
