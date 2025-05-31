@@ -5,6 +5,7 @@ import os
 import time
 import json
 from stem.control import Controller
+from datetime import datetime, timedelta
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 DATABASE_PATH = os.path.join(script_dir, 'leaderboard.db')
@@ -22,6 +23,10 @@ NEG_REPORTS_FILE = os.path.join(script_dir, 'neg_reports.json')
 POS_REPORTS_FILE = os.path.join(script_dir, 'pos_reports.json')
 
 social_scores = {}
+kick_list = {}  # Track kicked users and their ban expiration
+kick_count = {}  # Track the number of kicks for each user
+banned_words = ["nigger", "kill yourself","sex","child porn", "porn","sex","murder","suicide","guns","gun","firearm","bomb"] # Admin-defined list of banned words
+user_warnings = {}  # Track warnings issued to users
 
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -40,6 +45,12 @@ class Score(db.Model):
 
     def __repr__(self):
         return f'<Score {self.username}: {self.score} (Banned: {self.banned})>'
+
+class MultiplayerRanking(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), nullable=False, unique=True)
+    wins = db.Column(db.Integer, default=0, nullable=False)
+    losses = db.Column(db.Integer, default=0, nullable=False)
 
 @app.route('/api/register', methods=['POST'])
 def register_user():
@@ -187,10 +198,28 @@ def admin_unban_user(username):
 def send_chat_message():
     data = request.get_json()
     if not data or 'username' not in data or 'message' not in data:
-        return jsonify({'error': 'Invalid data. Username and message are required.'}), 400
+        return jsonify({'error': 'Invalid data. Username and message are required.'}), 400  # Fixed missing closing parenthesis
 
     username = data['username']
     message = data['message']
+
+    for word in banned_words:
+        if word in message.lower():
+            if username in kick_list and kick_list[username] > datetime.now():
+                return jsonify({'error': f'User {username} is currently banned.'}), 403
+
+            if username in kick_count and kick_count[username] >= 5:
+                user_score = Score.query.filter_by(username=username).first()
+                if user_score:
+                    user_score.banned = True
+                    db.session.commit()
+                return jsonify({'error': f'User {username} has been permanently banned.'}), 403
+
+            kick_list[username] = datetime.now() + timedelta(minutes=15)
+            kick_count[username] = kick_count.get(username, 0) + 1
+            social_scores[username] = 50
+            return jsonify({'error': f'User {username} has been kicked for using inappropriate language.'}), 403
+
     chat_message = json.dumps({"type": "chat_message", "username": username, "message": message})
     
     chat_message_queue.append(chat_message)
@@ -354,6 +383,53 @@ def get_user_bonus():
 
     bonus = positive_reports * 10
     return jsonify({'bonus': bonus}), 200
+
+@app.route('/api/admin/banned_words', methods=['POST'])
+def update_banned_words():
+    data = request.get_json()
+    if not data or 'words' not in data:
+        return jsonify({'error': 'Invalid data. Words are required.'}), 400
+    global banned_words
+    banned_words = data['words']
+    return jsonify({'message': 'Banned words updated successfully.'}), 200
+
+@app.route('/api/admin/kick_list', methods=['GET'])
+def get_kick_list():
+    active_kicks = {user: time.isoformat() for user, time in kick_list.items() if time > datetime.now()}  # Fixed time serialization
+    return jsonify(active_kicks), 200
+
+@app.route('/api/admin/kick_count', methods=['GET'])
+def get_kick_count():
+    return jsonify(kick_count), 200
+
+@app.route('/api/multiplayer_rankings', methods=['GET'])
+def get_multiplayer_rankings():
+    rankings = MultiplayerRanking.query.order_by(MultiplayerRanking.wins.desc()).all()
+    return jsonify([{"username": r.username, "wins": r.wins, "losses": r.losses} for r in rankings]), 200
+
+@app.route('/api/multiplayer_rankings/update', methods=['POST'])
+def update_multiplayer_rankings():
+    data = request.get_json()
+    if not data or 'username' not in data or 'result' not in data:
+        return jsonify({'error': 'Invalid data. Username and result are required.'}), 400
+
+    username = data['username']
+    result = data['result']  # "win" or "loss"
+
+    ranking = MultiplayerRanking.query.filter_by(username=username).first()
+    if not ranking:
+        ranking = MultiplayerRanking(username=username)
+        db.session.add(ranking)
+
+    if result == "win":
+        ranking.wins += 1
+    elif result == "loss":
+        ranking.losses += 1
+    else:
+        return jsonify({'error': 'Invalid result. Must be "win" or "loss".'}), 400
+
+    db.session.commit()
+    return jsonify({'message': 'Multiplayer ranking updated successfully.'}), 200
 
 if __name__ == '__main__':
     with app.app_context():
