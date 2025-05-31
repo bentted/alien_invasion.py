@@ -65,6 +65,8 @@ class AlienInvasion:
         self.high_score_mode_button = Button(self, "High Score Mode")
         self.back_button = Button(self, "Back")
         self.multiplayer_button = Button(self, "Multiplayer")  # Add Multiplayer button
+        self.marketplace_button = Button(self, "Marketplace")  # Add Marketplace button
+        self.achievements_button = Button(self, "Achievements")  # Add Achievements button
 
         self.font = pygame.font.SysFont(None, 48)
         self.title_font = pygame.font.SysFont(None, 72)
@@ -142,6 +144,30 @@ class AlienInvasion:
         self.audio_stream = None
 
         self.kick_list = {}  # Track kicked users and their ban expiration
+
+        self.marketplace_active = False
+        self.marketplace_items = [
+            {"name": "New Ship", "cost": 500, "type": "ship"},
+            {"name": "Alien Skin", "cost": 300, "type": "alien"},
+            {"name": "Speed Upgrade", "cost": 200, "type": "upgrade", "effect": "speed"},
+            {"name": "Fire Rate Upgrade", "cost": 200, "type": "upgrade", "effect": "fire_rate"},
+            {"name": "Extra Life", "cost": 1000, "type": "upgrade", "effect": "life"}
+        ]
+        self.player_currency = 1000  # Starting currency for the player
+
+        self.chest_drop_threshold = 1000  # Points required for a chest drop
+        self.last_chest_drop_score = 0  # Track the score at the last chest drop
+        self.active_chest_upgrade = None  # Track the active chest upgrade
+
+        self.achievements_active = False
+        self.achievements = [
+            {"name": "First Blood", "description": "Destroy your first alien.", "unlocked": False},
+            {"name": "Sharp Shooter", "description": "Destroy 50 aliens.", "unlocked": False},
+            {"name": "Survivor", "description": "Survive 5 levels.", "unlocked": False},
+            {"name": "Chest Collector", "description": "Collect 5 chests.", "unlocked": False},
+            {"name": "High Scorer", "description": "Score 10,000 points.", "unlocked": False},
+        ]
+        self.chests_collected = 0  # Track the number of chests collected
 
     def _initialize_settings_sliders(self):
         """Create sliders for the settings page."""
@@ -260,6 +286,12 @@ class AlienInvasion:
         elif self.multiplayer_button.rect.collidepoint(mouse_pos):
             self.title_screen_active = False
             self._start_random_match()  # Start random multiplayer match
+        elif self.marketplace_button.rect.collidepoint(mouse_pos):
+            self.title_screen_active = False
+            self.marketplace_active = True
+        elif self.achievements_button.rect.collidepoint(mouse_pos):
+            self.title_screen_active = False
+            self.achievements_active = True
 
     def _check_settings_page_buttons(self, mouse_pos):
         """Check if any settings page buttons were clicked."""
@@ -389,6 +421,7 @@ class AlienInvasion:
                 self.stats.score += base_points - penalty_points + bonus_points
             self.sb.prep_score()
             self.sb.check_high_score()
+            self._check_for_chest_drop()
 
         if not self.aliens:
             self.bullets.empty()
@@ -456,6 +489,10 @@ class AlienInvasion:
             self._draw_registration_screen()
         elif self.report_window_active:
             self._draw_report_window()
+        elif self.marketplace_active:
+            self._draw_marketplace()
+        elif self.achievements_active:
+            self._draw_achievements_screen()
         else:
             self.screen.fill(self.settings.bg_color)
 
@@ -521,6 +558,16 @@ class AlienInvasion:
         self.multiplayer_button.rect.centerx = self.screen_rect.centerx
         self.multiplayer_button.rect.top = current_top
         self.multiplayer_button.draw_button()
+
+        current_top += self.multiplayer_button.rect.height + button_spacing
+        self.marketplace_button.rect.centerx = self.screen_rect.centerx
+        self.marketplace_button.rect.top = current_top
+        self.marketplace_button.draw_button()
+
+        current_top += self.marketplace_button.rect.height + button_spacing
+        self.achievements_button.rect.centerx = self.screen_rect.centerx
+        self.achievements_button.rect.top = current_top
+        self.achievements_button.draw_button()
 
         leaderboard_title_text = "Global Leaderboard"
         leaderboard_title_image = self.font.render(leaderboard_title_text, True, self.settings.text_color, self.settings.bg_color)
@@ -1041,3 +1088,270 @@ class AlienInvasion:
             print(f"Voice chat is disabled for {username} until {self.kick_list[username]}.")
             return False
         return True
+
+    def _draw_marketplace(self):
+        """Draw the marketplace screen."""
+        self.screen.fill(self.settings.bg_color)
+        title_text = "Marketplace"
+        title_image = self.title_font.render(title_text, True, self.settings.text_color)
+        title_rect = title_image.get_rect()
+        title_rect.centerx = self.screen_rect.centerx
+        title_rect.top = 50
+        self.screen.blit(title_image, title_rect)
+
+        y_offset = 150
+        for item in self.marketplace_items:
+            item_text = f"{item['name']} - {item['cost']} Credits"
+            item_image = self.font.render(item_text, True, self.settings.text_color)
+            item_rect = item_image.get_rect()
+            item_rect.centerx = self.screen_rect.centerx
+            item_rect.top = y_offset
+            self.screen.blit(item_image, item_rect)
+            y_offset += 50
+
+        back_button = Button(self, "Back")
+        back_button.rect.centerx = self.screen_rect.centerx
+        back_button.rect.top = y_offset + 50
+        back_button.draw_button()
+        self.marketplace_back_button = back_button
+
+        pygame.mouse.set_visible(True)
+
+    def _check_marketplace_buttons(self, mouse_pos):
+        """Check if any marketplace buttons were clicked."""
+        if self.marketplace_back_button.rect.collidepoint(mouse_pos):
+            self.marketplace_active = False
+            self.title_screen_active = True
+        else:
+            y_offset = 150
+            for item in self.marketplace_items:
+                item_rect = pygame.Rect(
+                    self.screen_rect.centerx - 150, y_offset, 300, 40
+                )
+                if item_rect.collidepoint(mouse_pos):
+                    self._purchase_item(item)
+                y_offset += 50
+
+    def _purchase_item(self, item):
+        """Handle purchasing an item from the marketplace."""
+        if self.player_currency >= item["cost"]:
+            self.player_currency -= item["cost"]
+            print(f"Purchased {item['name']} for {item['cost']} credits.")
+            if item["type"] == "ship":
+                self._unlock_new_ship()
+            elif item["type"] == "alien":
+                self._unlock_new_alien_skin()
+            elif item["type"] == "upgrade":
+                self._apply_upgrade(item["effect"])
+        else:
+            print("Not enough credits to purchase this item.")
+
+    def _unlock_new_ship(self):
+        """Unlock a new ship for the player."""
+        print("New ship unlocked!")
+
+    def _unlock_new_alien_skin(self):
+        """Unlock a new alien skin for the player."""
+        print("New alien skin unlocked!")
+
+    def _apply_upgrade(self, effect):
+        """Apply an upgrade to the player."""
+        if effect == "speed":
+            self.settings.ship_speed += 0.5
+            print("Speed upgraded!")
+        elif effect == "fire_rate":
+            self.settings.bullet_speed += 0.5
+            print("Fire rate upgraded!")
+        elif effect == "life":
+            self.stats.ships_left += 1
+            self.sb.prep_ships()
+            print("Extra life added!")
+
+    def _check_for_chest_drop(self):
+        """Check if a chest should drop based on the score."""
+        if self.stats.score - self.last_chest_drop_score >= self.chest_drop_threshold:
+            self.last_chest_drop_score = self.stats.score
+            self._drop_chest()
+
+    def _drop_chest(self):
+        """Handle the chest drop and apply a random upgrade."""
+        upgrades = ["double_speed", "double_fire_rate", "double_score"]
+        self.active_chest_upgrade = random.choice(upgrades)
+        print(f"Chest dropped! Upgrade applied: {self.active_chest_upgrade}")
+
+        if self.active_chest_upgrade == "double_speed":
+            self.settings.ship_speed *= 2
+        elif self.active_chest_upgrade == "double_fire_rate":
+            self.settings.bullet_speed *= 2
+        elif self.active_chest_upgrade == "double_score":
+            self.settings.score_scale *= 2
+
+        self.chests_collected += 1  # Increment chests collected
+
+    def _reset_chest_upgrade(self):
+        """Reset the chest upgrade when the player loses a life."""
+        if self.active_chest_upgrade:
+            print(f"Chest upgrade expired: {self.active_chest_upgrade}")
+            if self.active_chest_upgrade == "double_speed":
+                self.settings.ship_speed /= 2
+            elif self.active_chest_upgrade == "double_fire_rate":
+                self.settings.bullet_speed /= 2
+            elif self.active_chest_upgrade == "double_score":
+                self.settings.score_scale /= 2
+            self.active_chest_upgrade = None
+
+    def _ship_hit(self):
+        """Respond to the ship being hit by an alien."""
+        self._reset_chest_upgrade()  # Reset chest upgrade on life loss
+
+    def _draw_achievements_screen(self):
+        """Draw the achievements screen."""
+        self.screen.fill(self.settings.bg_color)
+        title_text = "Achievements"
+        title_image = self.title_font.render(title_text, True, self.settings.text_color)
+        title_rect = title_image.get_rect()
+        title_rect.centerx = self.screen_rect.centerx
+        title_rect.top = 50
+        self.screen.blit(title_image, title_rect)
+
+        y_offset = 150
+        for achievement in self.achievements:
+            status = "Unlocked" if achievement["unlocked"] else "Locked"
+            achievement_text = f"{achievement['name']} - {achievement['description']} ({status})"
+            achievement_image = self.font.render(achievement_text, True, self.settings.text_color)
+            achievement_rect = achievement_image.get_rect()
+            achievement_rect.centerx = self.screen_rect.centerx
+            achievement_rect.top = y_offset
+            self.screen.blit(achievement_image, achievement_rect)
+            y_offset += 50
+
+        back_button = Button(self, "Back")
+        back_button.rect.centerx = self.screen_rect.centerx
+        back_button.rect.top = y_offset + 50
+        back_button.draw_button()
+        self.achievements_back_button = back_button
+
+        pygame.mouse.set_visible(True)
+
+    def _check_achievements_buttons(self, mouse_pos):
+        """Check if any achievements screen buttons were clicked."""
+        if self.achievements_back_button.rect.collidepoint(mouse_pos):
+            self.achievements_active = False
+            self.title_screen_active = True
+
+    def _update_achievements(self):
+        """Update achievements based on game progress."""
+        if not self.achievements[0]["unlocked"] and self.stats.score > 0:
+            self.achievements[0]["unlocked"] = True
+            print("Achievement unlocked: First Blood")
+
+        if not self.achievements[1]["unlocked"] and self.stats.aliens_destroyed >= 50:
+            self.achievements[1]["unlocked"] = True
+            print("Achievement unlocked: Sharp Shooter")
+
+        if not self.achievements[2]["unlocked"] and self.stats.level >= 5:
+            self.achievements[2]["unlocked"] = True
+            print("Achievement unlocked: Survivor")
+
+        if not self.achievements[3]["unlocked"] and self.chests_collected >= 5:
+            self.achievements[3]["unlocked"] = True
+            print("Achievement unlocked: Chest Collector")
+
+        if not self.achievements[4]["unlocked"] and self.stats.score >= 10000:
+            self.achievements[4]["unlocked"] = True
+            print("Achievement unlocked: High Scorer")
+
+    def _update_screen(self):
+        """Update images on the screen, and flip to the new screen."""
+        if self.achievements_active:
+            self._draw_achievements_screen()
+        else:
+            self.screen.fill(self.settings.bg_color)
+
+            if self.title_screen_active:
+                self._draw_title_screen()
+            elif self.settings_page_active:
+                self._draw_settings_page()
+            elif self.username_input_active:
+                self._draw_username_input()
+            elif self.login_screen_active:
+                self._draw_login_screen()
+            elif self.registration_screen_active:
+                self._draw_registration_screen()
+            elif self.report_window_active:
+                self._draw_report_window()
+            elif self.marketplace_active:
+                self._draw_marketplace()
+            else:
+                self.screen.fill(self.settings.bg_color)
+
+            self.ship.blitme()
+            for bullet in self.bullets.sprites():
+                bullet.draw_bullet()
+            self.aliens.draw(self.screen)
+            self.opponent_aliens.draw(self.screen)
+
+            self.sb.show_score()
+
+            pygame.display.flip()
+
+            self._update_upgrades() 
+
+    def _check_events(self):
+        """Respond to keypresses and mouse events."""
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                self._save_high_scores()
+                self.sse_client_running = False
+                if self.sse_thread and self.sse_thread.is_alive():
+                    try:
+                        self.sse_thread.join(timeout=1.0)
+                    except RuntimeError:
+                        pass
+                sys.exit()
+
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    if self.settings_page_active:
+                        self._apply_slider_settings()
+                        self.settings_page_active = False
+                        self.title_screen_active = True
+                        continue
+                    else:
+                        self._save_high_scores()
+                        self.sse_client_running = False
+                        if self.sse_thread and self.sse_thread.is_alive():
+                            try:
+                                self.sse_thread.join(timeout=1.0)
+                            except RuntimeError:
+                                pass
+                        sys.exit()
+
+            if self.title_screen_active:
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    mouse_pos = pygame.mouse.get_pos()
+                    self._check_title_screen_buttons(mouse_pos)
+            elif self.settings_page_active:
+                for slider in self.settings_sliders:
+                    slider.handle_event(event)
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    mouse_pos = pygame.mouse.get_pos()
+                    self._check_settings_page_buttons(mouse_pos)
+            elif self.username_input_active:
+                if event.type == pygame.KEYDOWN:
+                    self._handle_username_input(event)
+            elif self.game_active:
+                if event.type == pygame.KEYDOWN:
+                    self._check_keydown_events(event)
+                elif event.type == pygame.KEYUP:
+                    self._check_keyup_events(event)
+            elif self.login_screen_active:
+                self._handle_login_input(event)
+            elif self.registration_screen_active:
+                self._handle_registration_input(event)
+            elif self.achievements_active:
+                self._check_achievements_buttons(mouse_pos)
+            else:
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    mouse_pos = pygame.mouse.get_pos()
+                    self._check_play_button(mouse_pos)
