@@ -1,124 +1,80 @@
-# Alien Invasion
+# Alien Invasion Game
 
-Alien Invasion is a Python-based arcade-style game where players control a spaceship to defend against waves of alien invaders. The game features dynamic gameplay, customizable settings, a global leaderboard, and a unique level code system.
-
----
-
-## Table of Contents
-
-1. [Game Overview](#game-overview)
-2. [Features](#features)
-3. [How to Play](#how-to-play)
-4. [Level Codes](#level-codes)
-5. [Leaderboard Server](#leaderboard-server)
-6. [Installation](#installation)
-7. [Repository Structure](#repository-structure)
-8. [Contribution](#contribution)
-9. [License](#license)
-
----
-
-## Game Overview
-
-Alien Invasion is a classic shooting game where players:
-- Navigate a spaceship to shoot down waves of alien invaders.
-- Progress through increasingly challenging levels.
-- Customize game settings to adjust difficulty.
-- Compete with others on a global leaderboard.
-- Use unique level codes to skip to specific levels.
-
-The game is built using Python and the `pygame` library, offering an engaging and interactive experience.
+Alien Invasion is a feature-rich 2D space shooter game built using Python and Pygame. Players control a spaceship to defend against waves of aliens, earn points, and unlock upgrades. The game includes multiplayer functionality, a marketplace, achievements, and more.
 
 ---
 
 ## Features
 
-### Gameplay
-- **Dynamic Alien Waves**: Aliens move faster and drop closer as levels progress.
-- **Score Tracking**: Earn points by destroying aliens. Scores are displayed in real-time.
-- **Game Over Conditions**: Lose a life when an alien reaches the bottom or collides with your ship.
+### 1. **Core Gameplay**
+- **Spaceship Control**: Move the spaceship left or right and shoot bullets to destroy aliens.
+- **Alien Waves**: Aliens move in a fleet and drop down as they approach the player.
+- **Levels**: Progress through increasingly difficult levels as you destroy all aliens in a wave.
+- **Score System**: Earn points for destroying aliens and completing levels.
 
-### Title Screen
-- **Start Game**: Begin a new game or resume from a level code.
-- **Settings**: Adjust gameplay parameters using sliders.
-- **Enter Level Code**: Input a code to start at a specific level.
-- **Exit**: Quit the game.
+### 2. **Multiplayer Mode**
+- **Host or Join**: Play with friends by hosting or joining a multiplayer game.
+- **Alien Sharing**: Send aliens to your opponent's screen to increase their difficulty.
+- **Win/Loss Tracking**: Multiplayer stats track your wins and losses.
 
-### Customizable Settings
-Adjustable parameters include:
-- Ship Limit
-- Bullets Allowed
-- Ship Speed
-- Bullet Speed
-- Alien Speed
-- Fleet Drop Speed
-- Speedup Scale
-- Score Scale
-- Bullet Width and Height
+### 3. **Voice Chat**
+- **Real-Time Communication**: Use voice chat during multiplayer games.
+- **Host and Client Support**: Voice chat works seamlessly for both hosts and clients.
+- **Kick and Ban**: Players kicked from chat have voice chat disabled for 3 days.
 
-### Level Codes
-- Each level generates a unique code upon completion.
-- Players can use these codes to start at specific levels.
+### 4. **Marketplace**
+- **Purchase Items**: Spend in-game currency to buy ships, alien skins, and upgrades.
+- **Available Items**:
+  - New Ship: Unlock a new spaceship design.
+  - Alien Skin: Customize the appearance of aliens.
+  - Speed Upgrade: Increase ship speed.
+  - Fire Rate Upgrade: Increase bullet speed.
+  - Extra Life: Gain an additional life.
 
-### Global Leaderboard
-- Submit scores to a global leaderboard.
-- View the top scores on the title screen.
-- Admin features for managing users and scores.
+### 5. **Achievements**
+- **Track Progress**: Unlock achievements based on your performance.
+- **Achievements List**:
+  - **First Blood**: Destroy your first alien.
+  - **Sharp Shooter**: Destroy 50 aliens.
+  - **Survivor**: Survive 5 levels.
+  - **Chest Collector**: Collect 5 chests.
+  - **High Scorer**: Score 10,000 points.
+- **Achievements Screen**: View all achievements and their unlock status.
 
-### Persistent High Scores
-- High scores are saved locally in `high_scores.json`.
-- Scores are loaded at the start of the game.
+### 6. **Chest Drops**
+- **Earn Rewards**: For every 1,000 points, a chest drops with a random upgrade.
+- **Temporary Upgrades**: Upgrades last until the player loses a life.
+- **Possible Upgrades**:
+  - Double Speed: Doubles the ship's speed.
+  - Double Fire Rate: Doubles the bullet speed.
+  - Double Score: Doubles the score multiplier.
 
----
+### 7. **Global Leaderboard**
+- **High Scores**: Compete with other players by submitting your high scores.
+- **Leaderboard Display**: View the top scores on the title screen.
 
-## How to Play
+### 8. **Settings**
+- **Customizable Gameplay**: Adjust game settings using sliders.
+- **Available Settings**:
+  - Ship Limit: Set the number of lives.
+  - Bullets Allowed: Limit the number of bullets on screen.
+  - Ship Speed: Adjust the speed of the spaceship.
+  - Bullet Speed: Adjust the speed of bullets.
+  - Alien Speed: Adjust the speed of aliens.
+  - Fleet Drop Speed: Adjust how quickly aliens drop down.
+  - Speedup Scale: Adjust how quickly the game speeds up.
+  - Score Scale: Adjust the score multiplier.
+  - Bullet Dimensions: Customize bullet width and height.
 
-### Controls
-- **Arrow Keys**: Move the spaceship left or right.
-- **Spacebar**: Shoot bullets.
-- **ESC**: Quit the game (scores are saved).
-- **Q**: Quit the game immediately.
+### 9. **Login and Registration**
+- **User Profiles**: Create and log in to user profiles.
+- **High Score Tracking**: Track high scores for individual users.
+- **Penalty and Bonus**: Load user-specific penalties and bonuses from the server.
 
-### Gameplay
-1. **Start the Game**: Click "Start Game" on the title screen.
-2. **Enter Username**: Input your username to track scores.
-3. **Shoot Aliens**: Use the spacebar to shoot and arrow keys to move.
-4. **Progress Through Levels**: Destroy all aliens to advance to the next level.
-5. **Game Over**: Lose all lives or let an alien reach the bottom.
-
----
-
-## Level Codes
-
-- After completing a level, a unique code is displayed.
-- Save this code to start at the same level later.
-- On the title screen, click "Enter Level Code" to input a code and start at the corresponding level.
-
----
-
-## Leaderboard Server
-
-The game includes a Flask-based leaderboard server to manage global scores.
-
-### API Endpoints
-
-#### Public Endpoints
-- **POST /api/scores**: Submit a score. Requires `username` and `score`.
-- **GET /api/leaderboard**: Retrieve the top 10 scores.
-
-#### Admin Endpoints
-- **DELETE /api/admin/users/<username>**: Remove a user.
-- **PUT /api/admin/users/<username>/score**: Update a user's score.
-- **PUT /api/admin/users/<username>/ban**: Ban a user.
-- **PUT /api/admin/users/<username>/unban**: Unban a user.
-
-### Running the Server
-1. Navigate to the project directory.
-2. Run the server using:
-   ```bash
-   python leaderboard_server.py
-   ```
-3. The server will be available at `http://127.0.0.1:5000`.
+### 10. **Reports and Moderation**
+- **Report Users**: Report players for inappropriate behavior in multiplayer chat.
+- **Report Reasons**: Choose from predefined topics like "Hate Speech" or "Harassment."
+- **Moderation**: Reports are sent to the server for review.
 
 ---
 
@@ -126,12 +82,16 @@ The game includes a Flask-based leaderboard server to manage global scores.
 
 ### Prerequisites
 - Python 3.8 or higher
-- `pip` package manager
+- Pygame library
+- Additional dependencies:
+  - `pyaudio` for voice chat
+  - `requests` for server communication
+  - `stem` for Tor proxy support (optional)
 
 ### Steps
 1. Clone the repository:
    ```bash
-   git clone https://github.com/your-repo/alien_invasion.git
+   git clone https://github.com/yourusername/alien_invasion.py.git
    cd alien_invasion.py
    ```
 2. Install dependencies:
@@ -145,48 +105,49 @@ The game includes a Flask-based leaderboard server to manage global scores.
 
 ---
 
-## Repository Structure
+## Controls
 
-```
-alien_invasion.py/
-├── alien_invasion/
-│   ├── Alien_Invasion.py       # Main game script
-│   ├── settings.py             # Game settings
-│   ├── game_stats.py           # Game statistics
-│   ├── scoreboard.py           # Scoreboard logic
-│   ├── ship.py                 # Ship logic
-│   ├── bullet.py               # Bullet logic
-│   ├── alien.py                # Alien logic
-│   ├── slider.py               # Slider for settings
-│   ├── buttons.py              # Button logic
-├── leaderboard_server.py       # Flask-based leaderboard server
-├── high_scores.json            # Local high score storage
-├── requirements.txt            # Python dependencies
-├── README.md                   # Project documentation
-```
+- **Arrow Keys**: Move the spaceship left or right.
+- **Spacebar**: Shoot bullets.
+- **Escape**: Pause or exit the game.
 
 ---
 
-## Contribution
+## Screens
 
-Contributions are welcome! Follow these steps to contribute:
-1. Fork the repository.
-2. Create a new branch:
-   ```bash
-   git checkout -b feature-name
-   ```
-3. Make your changes and commit them:
-   ```bash
-   git commit -m "Add feature-name"
-   ```
-4. Push to your fork:
-   ```bash
-   git push origin feature-name
-   ```
-5. Open a pull request.
+### 1. **Title Screen**
+- Start the game, access settings, view the leaderboard, or enter multiplayer mode.
+
+### 2. **Settings Screen**
+- Adjust gameplay settings using sliders.
+
+### 3. **Marketplace**
+- Spend in-game currency to purchase items and upgrades.
+
+### 4. **Achievements Screen**
+- View all achievements and their unlock status.
+
+### 5. **Gameplay Screen**
+- Control your spaceship, destroy aliens, and progress through levels.
+
+---
+
+## Future Enhancements
+
+- **Additional Achievements**: Add more achievements for advanced players.
+- **New Game Modes**: Introduce time attack or survival modes.
+- **Cosmetic Upgrades**: Expand the marketplace with more customization options.
+
+---
+
+## Contributing
+
+Contributions are welcome! Please fork the repository and submit a pull request with your changes.
+
+---
+
 ## License
 
 This project is licensed under the MIT License. See the `LICENSE` file for details.
----
 
 
