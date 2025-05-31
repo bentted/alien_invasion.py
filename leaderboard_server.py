@@ -446,4 +446,4 @@ if __name__ == '__main__':
     else:
         print("Failed to set up Tor hidden service. Running server without Tor.")
 
-    app.run(debug=True)
+    app.run(host='192.168.254.14', port=5555, debug=True)  # Updated host and port

@@ -1,0 +1,4 @@
+pygame==2.1.2
+pyaudio==0.2.13
+requests==2.31.0
+stem==1.8.0
